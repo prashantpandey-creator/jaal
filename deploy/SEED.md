@@ -39,8 +39,9 @@ docker run -d --name jaal-seed --restart unless-stopped \
 - **Without Docker:** `JAAL_NET_FILE=net-secret node deploy/seed.js --data ~/.jaal-seed`, then open
   TCP 4747 (`ufw allow 4747/tcp`).
 - **Check:** `docker logs jaal-seed` prints the banner with `private net` and the seed's address. Its own
-  memory is about 10 MiB. `docker stats` shows ~110 MiB because it also counts the page cache holding
-  the node binary, and the kernel takes that back before it would hit the cap.
+  memory is about 10 MiB. On a first start `docker stats` can show ~110 MiB, because it also counts the
+  page cache holding the node binary, and the kernel takes that back before it would hit the cap. Once the
+  binary is cached, a recreated seed shows ~12 MiB.
 - `data/` holds the seed's identity, so its address stays the same across restarts. Keep it.
 
 ## 3. Join from any machine (Node 20+)
