@@ -1,0 +1,780 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jāla</title>
+<style>
+:root{--bg:#07060b;--panel:rgba(255,255,255,.025);--line:rgba(212,175,55,.14);--saffron:#ff9933;--gold:#d4af37;--text:#ebe5d8;--muted:#8f8aa0;--sky:#7fd3e6;--bad:#ff7a6b;--ok:#a6e3a1;
+--serif:ui-serif,"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;--sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;color:var(--text);font:14px/1.55 var(--sans)}
+body{background:radial-gradient(1100px 700px at 28% -12%,rgba(255,153,51,.10),transparent 60%),radial-gradient(900px 600px at 112% 112%,rgba(127,211,230,.07),transparent 60%),var(--bg)}
+button,input,select,textarea{font:inherit;color:inherit}
+header{display:flex;align-items:center;gap:18px;padding:13px 22px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:baseline;gap:10px;white-space:nowrap}
+.brand b{font:500 22px/1 var(--serif);letter-spacing:.16em;color:var(--saffron);text-shadow:0 0 18px rgba(255,153,51,.45)}
+.brand span{color:var(--muted);font-size:12px;letter-spacing:.05em}
+.bar{flex:1;display:flex;gap:8px;max-width:760px}
+.bar input{flex:1;min-width:0;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:999px;padding:9px 16px;font:13px var(--mono);outline:none}
+.bar input:focus,.field input:focus,.field select:focus,.field textarea:focus,.inp:focus{border-color:rgba(255,153,51,.55);box-shadow:0 0 0 3px rgba(255,153,51,.12)}
+.btn{background:rgba(255,153,51,.12);border:1px solid rgba(255,153,51,.42);color:#ffd29e;border-radius:999px;padding:8px 16px;cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-block}
+.btn:hover{background:rgba(255,153,51,.22)}
+.btn.ghost{background:transparent;border-color:var(--line);color:var(--text)}
+.btn.sky{background:rgba(127,211,230,.1);border-color:rgba(127,211,230,.45);color:#c9f1fa}
+.btn.small{padding:4px 11px;font-size:12px}
+.me{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;white-space:nowrap}
+.pill{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:999px;padding:5px 12px;cursor:pointer}
+.dot{width:8px;height:8px;border-radius:50%;background:#55506a;display:inline-block;flex:none}
+.dot.on{background:var(--saffron);box-shadow:0 0 10px var(--saffron)}
+.dot.sky{background:var(--sky);box-shadow:0 0 10px var(--sky)}
+main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(380px,1fr);gap:18px;padding:18px 22px;height:calc(100% - 62px)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;min-height:0}
+#mapWrap{position:relative;display:flex;flex-direction:column;overflow:hidden}
+#map{flex:1;width:100%;min-height:340px;display:block}
+.legend{display:flex;flex-wrap:wrap;gap:14px;padding:10px 16px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+.legend i{display:inline-block;width:18px;height:0;border-top:2px solid var(--gold);vertical-align:middle;margin-right:6px}
+.legend i.dash{border-top:2px dashed rgba(212,175,55,.5)}
+.legend i.skyl{border-top:2px dashed var(--sky)}
+.stats{position:absolute;top:12px;left:16px;font-size:12px;color:var(--muted);line-height:1.85;pointer-events:none}
+.stats b{color:var(--text);font-weight:600}
+#card{position:absolute;right:12px;top:12px;width:290px;display:none}
+.card{background:rgba(10,8,16,.93);border:1px solid rgba(255,153,51,.32);border-radius:14px;padding:14px;backdrop-filter:blur(8px)}
+.card h3{margin:0 0 3px;font:500 17px var(--serif);color:#ffd29e}
+.addr{font:11.5px var(--mono);color:var(--gold);word-break:break-all}
+.muted{color:var(--muted)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.side{display:flex;flex-direction:column;min-height:0}
+.tabs{display:flex;gap:4px;padding:8px;border-bottom:1px solid var(--line)}
+.tab{flex:1;background:none;border:0;border-radius:10px;padding:9px 6px;color:var(--muted);cursor:pointer}
+.tab.on{background:rgba(255,153,51,.1);color:#ffd29e}
+.badge{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--saffron);color:#1a0f00;font-size:11px;font-weight:700;margin-left:6px;line-height:18px}
+.pane{display:none;padding:16px 16px 22px;overflow:auto;flex:1}
+.pane.on{display:block}
+h2{font:500 16px var(--serif);letter-spacing:.03em;color:#ffd29e;margin:6px 0 10px}
+.item{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 10px;background:rgba(0,0,0,.18)}
+.item .t{font-weight:600;margin-bottom:2px}
+.field{display:flex;flex-direction:column;gap:4px;margin:0 0 10px}
+.field label{font-size:12px;color:var(--muted)}
+.field input,.field select,.field textarea,.inp{background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:10px;padding:8px 11px;outline:none}
+.field select option{background:#120f18}
+code{font:12px var(--mono);color:var(--gold)}
+pre.code{font:12px var(--mono);color:var(--gold);background:rgba(0,0,0,.4);border:1px solid var(--line);border-radius:10px;padding:10px 12px;white-space:pre-wrap;word-break:break-all;margin:8px 0 0}
+.headline{display:flex;gap:10px;align-items:flex-start;font-size:15px;margin:2px 0 14px;line-height:1.45}
+.headline .dot{margin-top:7px}
+.thread{display:flex;flex-direction:column;gap:8px;margin:4px 0 12px;max-height:46vh;overflow:auto;padding-right:4px}
+.msg{max-width:84%;padding:8px 12px;border-radius:14px;background:rgba(255,255,255,.05);border:1px solid var(--line);white-space:pre-wrap;word-break:break-word}
+.msg.mine{align-self:flex-end;background:rgba(255,153,51,.1);border-color:rgba(255,153,51,.3)}
+.msg small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.skyt{color:var(--sky)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+td,th{text-align:left;padding:6px;border-bottom:1px solid rgba(212,175,55,.08);vertical-align:top}
+th{color:var(--muted);font-weight:500}
+.tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:999px;padding:0 7px;margin-right:4px;color:var(--muted)}
+.tag.sky{border-color:rgba(127,211,230,.4);color:var(--sky)}
+.tag.gold{border-color:rgba(212,175,55,.45);color:var(--gold)}
+#viewer{position:fixed;inset:0;background:rgba(4,3,8,.88);backdrop-filter:blur(6px);display:none;flex-direction:column;z-index:10}
+#viewer.on{display:flex}
+.vbar{display:flex;align-items:center;gap:12px;padding:10px 16px}
+.vbar .grow{flex:1;min-width:0}
+.vbar .addr{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#frame{flex:1;border:0;background:#fff;margin:0 16px 16px;border-radius:12px}
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:rgba(16,12,24,.97);border:1px solid rgba(255,153,51,.38);border-radius:12px;padding:10px 16px;display:none;z-index:20;max-width:80vw}
+@media (max-width:1000px){main{grid-template-columns:1fr;height:auto}#map{min-height:400px}.me{display:none}header{flex-wrap:wrap}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><b>◈ JĀLA</b><span>your own internet</span></div>
+  <form class="bar" id="go"><input id="url" placeholder="jaal://address/page  —  or an https:// address to reach through the net" autocomplete="off" spellcheck="false"><button class="btn">Go</button></form>
+  <div class="me"><span class="pill" id="mePill" title="Copy your address"><span class="dot" id="meDot"></span><span id="meName">connecting…</span><span class="addr" id="meAddr"></span></span></div>
+</header>
+<main>
+  <section class="panel" id="mapWrap">
+    <canvas id="map" aria-label="Map of the net"></canvas>
+    <div class="stats" id="stats"></div>
+    <div id="card"></div>
+    <div class="legend"><span><i></i>your links</span><span><i class="dash"></i>reached through a neighbour</span><span><i class="skyl"></i>bridge to the regular internet</span><span><span class="dot on"></span> online</span><span><span class="dot"></span> offline</span></div>
+  </section>
+  <section class="panel side">
+    <nav class="tabs">
+      <button class="tab on" data-tab="sites">Sites</button>
+      <button class="tab" data-tab="msgs">Messages<span id="unread"></span></button>
+      <button class="tab" data-tab="net">Internet</button>
+      <button class="tab" data-tab="links">Links</button>
+    </nav>
+
+    <div class="pane on" id="pane-sites">
+      <h2>Your site</h2>
+      <div id="mySite"></div>
+      <form id="pubForm" class="item">
+        <div class="field"><label>Folder to publish (needs an index.html)</label><input id="pubDir" placeholder="~/my-site" spellcheck="false"></div>
+        <div class="field"><label>Title (optional)</label><input id="pubTitle" placeholder="taken from the page's &lt;title&gt;"></div>
+        <div class="row"><button class="btn">Publish to the net</button><span class="muted" style="font-size:12px">signed with your key · dotfiles never included</span></div>
+      </form>
+      <h2>On the net</h2>
+      <div id="siteList"></div>
+    </div>
+
+    <div class="pane" id="pane-msgs">
+      <div class="field"><label>Talk to</label><select id="chatSel"></select></div>
+      <div class="field" id="chatAddrField" style="display:none"><label>Their address</label><input id="chatAddr" placeholder="32-letter address" spellcheck="false"></div>
+      <div class="thread" id="thread"></div>
+      <form id="sendForm" class="row"><input class="inp" id="sendText" style="flex:1;min-width:0" placeholder="Write a message — sealed end to end" autocomplete="off"><button class="btn">Send</button></form>
+      <p class="muted" style="font-size:12px;margin-top:10px">Relays carry only ciphertext. If they're offline it waits, and goes the moment a path to them opens.</p>
+    </div>
+
+    <div class="pane" id="pane-net">
+      <div class="headline" id="netHead"></div>
+      <div class="item"><div class="t">Use the net from any browser or app</div><div id="proxyInfo" class="muted"></div></div>
+      <form id="checkForm" class="item">
+        <div class="field"><label>Fetch a real website through the net</label><input id="checkUrl" value="https://example.com/" spellcheck="false"></div>
+        <button class="btn sky">Reach it through Jāla</button>
+        <div id="checkOut" style="margin-top:10px"></div>
+      </form>
+      <h2>Exits — nodes sharing their internet</h2>
+      <div id="exitList"></div>
+      <div id="exitMine"></div>
+    </div>
+
+    <div class="pane" id="pane-links">
+      <div class="item"><div class="t">This node</div><div id="meInfo"></div></div>
+      <form id="peerForm" class="item row"><input class="inp" id="peerIn" placeholder="host:port of another node (same Wi-Fi finds itself)" style="flex:1;min-width:0" spellcheck="false"><button class="btn">Link</button></form>
+      <h2>Direct links</h2>
+      <div id="linkList"></div>
+      <h2>Everyone you can see</h2>
+      <div id="nodeTable"></div>
+    </div>
+  </section>
+</main>
+<div id="viewer">
+  <div class="vbar">
+    <button class="btn ghost small" data-act="close">✕ close</button>
+    <div class="grow"><div id="vTitle" style="font-weight:600"></div><div class="addr" id="vAddr"></div></div>
+    <span class="muted" id="vSrc" style="font-size:12px"></span>
+    <a class="btn ghost small" id="vOpen" target="_blank" rel="noopener">open in tab ↗</a>
+  </div>
+  <iframe id="frame" title="Jāla site" sandbox="allow-scripts allow-forms allow-popups allow-same-origin" referrerpolicy="same-origin"></iframe>
+</div>
+<div id="toast"></div>
+<script nonce="__NONCE__">
+(() => {
+  'use strict';
+  const TOKEN = '__TOKEN__';
+  const CONTENT = '__CONTENT__';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const short = (a) => (a ? a.slice(0, 6) + '…' + a.slice(-4) : '');
+  const ago = (ms) => (ms < 60e3 ? Math.max(1, Math.round(ms / 1e3)) + 's ago' : ms < 3600e3 ? Math.round(ms / 60e3) + 'm ago' : Math.round(ms / 3600e3) + 'h ago');
+  const size = (n) => (n > 1 << 20 ? (n / (1 << 20)).toFixed(1) + ' MB' : n > 1024 ? Math.round(n / 1024) + ' KB' : n + ' B');
+  const hops = (h) => `${h} hop${h === 1 ? '' : 's'}`;
+  const setHTML = (el, html) => { if (el._h !== html) { el._h = html; el.innerHTML = html; } };
+
+  async function api(route, body) {
+    const r = await fetch('/api/' + route, {
+      method: body ? 'POST' : 'GET',
+      headers: { 'x-jaal-token': TOKEN, 'content-type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+    return j;
+  }
+  let toastTimer;
+  function toast(msg, bad) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.style.display = 'block';
+    t.style.borderColor = bad ? 'rgba(255,122,107,.55)' : '';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (t.style.display = 'none'), 4200);
+  }
+
+  let S = null;
+  let M = [];
+  let tab = 'sites';
+  let chatWith = null;
+  let sel = null;
+  let lastTraffic = null;
+  const nodeBy = (a) => (S ? S.nodes.find((n) => n.addr === a) : null);
+  const nameOf = (a) => (!S ? short(a) : a === S.me.addr ? S.me.name : nodeBy(a)?.name || short(a));
+
+  // ------------------------------------------------------------ status loop
+  async function tick() {
+    try {
+      S = await api('status');
+      $('meDot').className = 'dot on';
+      $('meName').textContent = S.me.name;
+      $('meAddr').textContent = short(S.me.addr);
+      const u = S.unread;
+      setHTML($('unread'), u ? `<span class="badge">${u}</span>` : '');
+      relayout();
+      renderAll();
+      pulse();
+    } catch {
+      $('meDot').className = 'dot';
+      $('meName').textContent = 'node not answering';
+    }
+  }
+  async function loadMsgs() {
+    try {
+      M = (await api('messages')).messages;
+      renderMsgs();
+    } catch { /* next round */ }
+  }
+  setInterval(tick, 2000);
+  setInterval(() => tab === 'msgs' && loadMsgs(), 2500);
+
+  function renderAll() {
+    renderSites();
+    renderNet();
+    renderLinks();
+    renderChatSel();
+    renderCard();
+    renderStats();
+  }
+
+  // ------------------------------------------------------------ sites
+  function renderSites() {
+    const me = S.me;
+    setHTML($('mySite'), me.site
+      ? `<div class="item"><div class="t">${esc(me.site.title)}</div><div class="addr">jaal://${me.addr}/</div>
+         <div class="row" style="margin-top:8px"><button class="btn small" data-act="visit" data-addr="${me.addr}">Visit</button>
+         <button class="btn ghost small" data-act="copy" data-text="jaal://${me.addr}/">Copy link</button>
+         <span class="muted" style="font-size:12px">lives on this machine${countMirrors(me.addr) ? ` + ${countMirrors(me.addr)} mirror${countMirrors(me.addr) === 1 ? '' : 's'}` : ''}</span></div></div>`
+      : '<p class="muted">No site yet. Publish a folder — it lives on this machine, and on any node that chooses to keep it alive.</p>');
+    const others = S.sites.filter((s) => !s.mine).sort((a, b) => Number(b.online) - Number(a.online) || (a.hops || 9) - (b.hops || 9));
+    setHTML($('siteList'), others.length ? others.map((s) => `
+      <div class="item"><div class="row" style="justify-content:space-between"><div class="t">${esc(s.title)}</div>
+        <span class="dot ${s.online ? 'on' : ''}" title="${s.online ? 'owner online' : 'owner offline'}"></span></div>
+        <div class="muted" style="font-size:12px">${esc(s.owner)} · ${s.online ? hops(s.hops) + ' away' : 'owner offline'}${s.mirrors ? ` · ${s.mirrors} mirror${s.mirrors === 1 ? '' : 's'}` : ''}${s.mirrored ? ' · <span class="tag gold">kept alive here</span>' : ''}</div>
+        <div class="row" style="margin-top:8px"><button class="btn small" data-act="visit" data-addr="${s.addr}">Visit</button>
+        ${s.mirrored ? `<button class="btn ghost small" data-act="unmirror" data-addr="${s.addr}">Stop keeping</button>` : `<button class="btn ghost small" data-act="mirror" data-addr="${s.addr}">Keep it alive</button>`}</div></div>`).join('')
+      : '<p class="muted">No other sites visible yet.</p>');
+  }
+  const countMirrors = (addr) => S.nodes.filter((n) => n.online && n.mirrors && n.mirrors.includes(addr)).length;
+
+  $('pubForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api('publish', { dir: $('pubDir').value.trim(), title: $('pubTitle').value.trim() || undefined });
+      toast(`Published “${r.title}” — ${r.files} files, ${size(r.bytes)}`);
+      tick();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  // ------------------------------------------------------------ viewer
+  function openSite(addr, p = '/') {
+    const n = S && (addr === S.me.addr ? { name: S.me.name + ' (you)', site: S.me.site, online: true, hops: 0 } : nodeBy(addr));
+    const site = S && S.sites.find((s) => s.addr === addr);
+    $('vTitle').textContent = site?.title || n?.site?.title || 'Jāla site';
+    $('vAddr').textContent = 'jaal://' + addr + p;
+    $('vSrc').textContent = !n ? 'looking for it…' : n.hops === 0 ? 'served by your node' : n.online ? `from ${n.name} · ${hops(n.hops)}` : `${n.name} is offline — from a mirror or your copy`;
+    const url = CONTENT + '/' + addr + p;
+    $('frame').src = url;
+    $('vOpen').href = url;
+    $('viewer').classList.add('on');
+    $('url').value = 'jaal://' + addr + p;
+  }
+  function closeViewer() {
+    $('viewer').classList.remove('on');
+    $('frame').src = 'about:blank';
+  }
+
+  $('go').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = $('url').value.trim();
+    if (!v) return;
+    const m = /^(?:jaal:\/\/)?([a-z2-7]{32})(\/.*)?$/i.exec(v) || /^https?:\/\/([a-z2-7]{32})\.jaal(\/.*)?$/i.exec(v);
+    if (m) return openSite(m[1].toLowerCase(), m[2] || '/');
+    if (/^https?:\/\//i.test(v)) {
+      switchTab('net');
+      $('checkUrl').value = v;
+      return runCheck();
+    }
+    const byName = S && S.nodes.find((n) => n.name.toLowerCase() === v.toLowerCase() && n.site);
+    if (byName) return openSite(byName.addr);
+    toast('Jāla addresses are 32 letters (a–z, 2–7). Or type an https:// address to reach it through the net.', true);
+  });
+
+  // ------------------------------------------------------------ messages
+  function renderChatSel() {
+    const opts = S.nodes.slice().sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
+    const sig = opts.map((n) => n.addr + n.online).join() + '|' + chatWith;
+    const el = $('chatSel');
+    if (el._sig === sig) return;
+    el._sig = sig;
+    const known = new Set(opts.map((n) => n.addr));
+    el.innerHTML = '<option value="">— choose someone —</option>' +
+      opts.map((n) => `<option value="${n.addr}">${n.online ? '● ' : '○ '}${esc(n.name)} · ${short(n.addr)}</option>`).join('') +
+      (chatWith && !known.has(chatWith) ? `<option value="${chatWith}">${short(chatWith)}</option>` : '') +
+      '<option value="other">another address…</option>';
+    el.value = chatWith || '';
+  }
+  function renderMsgs() {
+    if (!S) return;
+    const me = S.me.addr;
+    if (!chatWith) return setHTML($('thread'), '<p class="muted">Pick someone above.</p>');
+    const t = M.filter((m) => (m.from === chatWith && m.to === me) || (m.from === me && m.to === chatWith)).sort((a, b) => a.ts - b.ts);
+    const el = $('thread');
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    setHTML(el, t.length ? t.map((m) => `<div class="msg ${m.from === me ? 'mine' : ''}">${esc(m.text)}<small>${new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${m.from === me ? ' · ' + (m.status === 'delivered' ? '<span class="ok">✓ delivered</span>' : m.status === 'queued' ? '<span class="muted">waiting for them</span>' : 'sending…') : ''}</small></div>`).join('')
+      : `<p class="muted">No messages with ${esc(nameOf(chatWith))} yet.</p>`);
+    if (atBottom) el.scrollTop = el.scrollHeight;
+    if (t.some((m) => m.from === chatWith && !m.read)) api('read', { with: chatWith }).catch(() => {});
+  }
+  $('chatSel').addEventListener('change', (e) => {
+    const v = e.target.value;
+    $('chatAddrField').style.display = v === 'other' ? '' : 'none';
+    chatWith = v === 'other' || !v ? null : v;
+    renderMsgs();
+  });
+  $('chatAddr').addEventListener('input', (e) => {
+    const v = e.target.value.trim().replace(/^jaal:\/\//, '').replace(/\/.*$/, '').toLowerCase();
+    chatWith = /^[a-z2-7]{32}$/.test(v) ? v : null;
+    renderMsgs();
+  });
+  $('sendForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = $('sendText').value.trim();
+    if (!chatWith) return toast('Choose who to talk to first', true);
+    if (!text) return;
+    $('sendText').value = '';
+    try {
+      const m = await api('send', { to: chatWith, text });
+      if (m.status === 'queued') toast(`${nameOf(chatWith)} is unreachable right now — it will go when they're back`);
+      loadMsgs();
+    } catch (err) {
+      $('sendText').value = text;
+      toast(err.message, true);
+    }
+  });
+
+  // ------------------------------------------------------------ internet bridge
+  function renderNet() {
+    const b = S.bridge;
+    const ex = b.exits;
+    setHTML($('netHead'), b.exit
+      ? `<span class="dot sky"></span><div><b>This node is a bridge.</b> It shares its internet with the net (ports ${b.exit.ports.join(', ')}, ${b.exit.open ? '<span class="bad">open to anyone</span>' : 'your net only'}).</div>`
+      : ex.length
+        ? `<span class="dot sky"></span><div><b>The regular internet is reachable through the net</b> — via ${esc(ex[0].name)}, ${hops(ex[0].hops)} away${ex.length > 1 ? ` (+${ex.length - 1} more exit${ex.length > 2 ? 's' : ''})` : ''}.</div>`
+        : '<span class="dot"></span><div><b>No internet exit on the net yet.</b> On a machine that has internet: <code>jaal start --exit --net &lt;secret&gt;</code>. Jāla itself works without one.</div>');
+    setHTML($('proxyInfo'), b.proxy
+      ? `Set <code>${b.proxy.host}:${b.proxy.port}</code> as the HTTP and HTTPS proxy (browser or system settings). Everything then travels the net; <code>http://&lt;address&gt;.jaal/</code> opens Jāla sites directly.<pre class="code">curl -x http://${b.proxy.host}:${b.proxy.port} https://example.com</pre>`
+      : 'The local proxy is off — start with <code>--proxy 8118</code>.');
+    setHTML($('exitList'), ex.length ? ex.map((x) => `<div class="item"><div class="row" style="justify-content:space-between"><div class="t">${esc(x.name)}</div><span class="tag sky">ports ${x.ports.join(', ')}</span></div><div class="muted" style="font-size:12px">${hops(x.hops)} away · <span class="addr">${short(x.addr)}</span>${S.bridge.via === x.addr ? ' · pinned with --via' : ''}</div></div>`).join('')
+      : '<p class="muted">None visible.</p>');
+    setHTML($('exitMine'), b.exit && b.exit.recent.length
+      ? `<h2>Carried out recently</h2><table><tr><th>for</th><th>to</th><th>when</th></tr>${b.exit.recent.map((r) => `<tr><td>${esc(r.from)}</td><td><code>${esc(r.host)}:${r.port}</code></td><td class="muted">${ago(Date.now() - r.at)}</td></tr>`).join('')}</table>`
+      : '');
+  }
+  async function runCheck() {
+    const out = $('checkOut');
+    out.innerHTML = '<span class="muted">reaching out through the net…</span>';
+    try {
+      const r = await api('webcheck', { url: $('checkUrl').value.trim() });
+      const via = r.via.self ? 'straight out of this node (it is the exit)' : `via ${esc(r.via.name)}, ${hops(r.via.hops)} across the net`;
+      out.innerHTML = `<div class="ok">✓ ${r.status} · ${r.title ? '“' + esc(r.title) + '”' : esc(r.url)} · ${r.ms} ms</div><div class="muted" style="font-size:12px">${via}${r.tls ? ` · TLS ${r.tls.verified ? 'verified' : 'NOT verified'}${r.tls.cert ? ' for ' + esc(r.tls.cert) : ''} — the exit saw only ciphertext` : ''}</div>`;
+    } catch (err) {
+      out.innerHTML = `<div class="bad">✗ ${esc(err.message)}</div>`;
+    }
+  }
+  $('checkForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    runCheck();
+  });
+
+  // ------------------------------------------------------------ links
+  function renderLinks() {
+    const me = S.me;
+    setHTML($('meInfo'), `<div class="addr" style="margin:4px 0 6px">jaal://${me.addr}</div>
+      <div class="muted" style="font-size:12px">${esc(me.name)} · link port :${me.port} · ${me.net} net · LAN discovery ${me.lan ? 'on' : 'off'} · carried ${S.stats.relayed} packets for others</div>
+      <div class="row" style="margin-top:8px"><button class="btn ghost small" data-act="copy" data-text="${me.addr}">Copy address</button></div>`);
+    setHTML($('linkList'), S.links.length ? `<table><tr><th>node</th><th>where</th><th>traffic</th></tr>${S.links.map((l) => `<tr><td>${esc(l.name || '?')}<div class="addr">${short(l.addr)}</div></td><td><code>${esc(l.host)}:${l.port}</code><div class="muted" style="font-size:11px">${l.out ? 'you dialled' : 'they dialled'} · ${ago(Date.now() - l.since)}</div></td><td class="muted">↓ ${size(l.rx)}<br>↑ ${size(l.tx)}</td></tr>`).join('')}</table>`
+      : '<p class="muted">No links yet. Nodes on your Wi-Fi find each other on their own; anywhere else, link to one with host:port.</p>');
+    const ns = S.nodes.slice().sort((a, b) => Number(b.online) - Number(a.online) || a.hops - b.hops);
+    setHTML($('nodeTable'), ns.length ? `<table><tr><th>node</th><th>distance</th><th>offers</th></tr>${ns.map((n) => `<tr><td><span class="dot ${n.online ? 'on' : ''}"></span> ${esc(n.name)}<div class="addr">${short(n.addr)}</div></td><td class="muted">${n.online ? hops(n.hops) : 'offline · ' + ago(n.seen)}</td><td>${n.site ? '<span class="tag gold">site</span>' : ''}${n.exit ? '<span class="tag sky">internet</span>' : ''}${n.mirrors && n.mirrors.length ? `<span class="tag">keeps ${n.mirrors.length}</span>` : ''}</td></tr>`).join('')}</table>`
+      : '<p class="muted">Nobody yet.</p>');
+  }
+  $('peerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const v = $('peerIn').value.trim();
+    if (!v) return;
+    try {
+      await api('connect', { peer: v });
+      $('peerIn').value = '';
+      toast(`Linking to ${v}…`);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  // ------------------------------------------------------------ tabs + actions
+  function switchTab(name) {
+    tab = name;
+    for (const b of document.querySelectorAll('.tab')) b.classList.toggle('on', b.dataset.tab === name);
+    for (const p of document.querySelectorAll('.pane')) p.classList.toggle('on', p.id === 'pane-' + name);
+    if (name === 'msgs') loadMsgs();
+  }
+  document.addEventListener('click', async (e) => {
+    const tb = e.target.closest('[data-tab]');
+    if (tb) return switchTab(tb.dataset.tab);
+    const el = e.target.closest('[data-act]');
+    if (!el) return;
+    const { act, addr, text } = el.dataset;
+    try {
+      if (act === 'visit') openSite(addr);
+      else if (act === 'close') closeViewer();
+      else if (act === 'copy') {
+        await navigator.clipboard.writeText(text);
+        toast('Copied');
+      } else if (act === 'chat') {
+        chatWith = addr;
+        switchTab('msgs');
+        renderChatSel();
+        renderMsgs();
+        $('sendText').focus();
+      } else if (act === 'ping') {
+        const r = await api('ping', { addr });
+        toast(`${r.name} answered in ${r.rtt} ms`);
+      } else if (act === 'mirror') {
+        toast('Copying the site here…');
+        const r = await api('mirror', { addr });
+        toast(`Keeping “${r.title}” alive here — ${r.files} files, ${size(r.bytes)}`);
+        tick();
+      } else if (act === 'unmirror') {
+        await api('mirror', { addr, off: true });
+        toast('No longer keeping it');
+        tick();
+      } else if (act === 'unselect') {
+        sel = null;
+        renderCard();
+      }
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+  $('mePill').addEventListener('click', async () => {
+    if (!S) return;
+    await navigator.clipboard.writeText(S.me.addr).catch(() => {});
+    toast('Your address is copied — give it to anyone you want to reach you');
+  });
+  document.addEventListener('keydown', (e) => e.key === 'Escape' && closeViewer());
+
+  // ------------------------------------------------------------ the map
+  const cv = $('map');
+  const ctx = cv.getContext('2d');
+  let W = 0;
+  let H = 0;
+  let DPR = 1;
+  let targets = new Map();
+  const pos = new Map();
+  let particles = [];
+  let hover = null;
+  const hash = (s) => {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+    return (h >>> 0) / 4294967296;
+  };
+  function resize() {
+    const r = cv.getBoundingClientRect();
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    W = r.width;
+    H = r.height;
+    cv.width = Math.round(W * DPR);
+    cv.height = Math.round(H * DPR);
+    relayout();
+  }
+  new ResizeObserver(resize).observe(cv);
+
+  const geo = () => ({ cx: W * 0.45, cy: H * 0.53, R: Math.max(46, Math.min(W, H) * 0.155) });
+  const netOrb = () => ({ x: W - 74, y: 74 });
+
+  function relayout() {
+    if (!S || !W) return;
+    const { cx, cy, R } = geo();
+    const T = new Map();
+    T.set(S.me.addr, { x: cx, y: cy, n: { addr: S.me.addr, name: S.me.name, me: true, online: true, site: S.me.site, exit: S.me.exit, hops: 0, via: null } });
+    const ns = S.nodes.filter((n) => n.online || n.seen < 900e3);
+    const direct = ns.filter((n) => n.direct).sort((a, b) => (a.addr < b.addr ? -1 : 1));
+    const ang = new Map();
+    direct.forEach((n, i) => ang.set(n.addr, -Math.PI * 0.62 + (i / Math.max(1, direct.length)) * Math.PI * 2));
+    const groups = new Map();
+    for (const n of ns.filter((x) => !ang.has(x.addr)).sort((a, b) => a.hops - b.hops || (a.addr < b.addr ? -1 : 1))) {
+      const k = (n.via || '?') + ':' + n.hops;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(n);
+    }
+    for (const [k, g] of groups) {
+      const via = k.split(':')[0];
+      const base = ang.has(via) ? ang.get(via) : hash(via) * Math.PI * 2;
+      const spread = 0.5 / Math.max(1, g[0].hops - 0.6);
+      g.forEach((n, i) => ang.set(n.addr, base + (i - (g.length - 1) / 2) * spread));
+    }
+    for (const n of ns) {
+      const ring = n.direct ? 1 : Math.min(Math.max(n.hops, 2), 4);
+      const a = ang.get(n.addr);
+      T.set(n.addr, { x: cx + Math.cos(a) * R * ring, y: cy + Math.sin(a) * R * ring * 0.86, n });
+    }
+    targets = T;
+    for (const [a, t] of T) if (!pos.has(a)) pos.set(a, { x: cx + (t.x - cx) * 0.2, y: cy + (t.y - cy) * 0.2 });
+    for (const a of [...pos.keys()]) if (!T.has(a)) pos.delete(a);
+  }
+
+  // whom a node hangs from on the map: the node one hop closer on the same path, else your neighbour
+  function parentOf(n) {
+    if (n.me || n.direct) return S.me.addr;
+    let best = null;
+    let bestD = Infinity;
+    const p = pos.get(n.addr);
+    for (const t of targets.values()) {
+      const m = t.n;
+      if (m.me || m.hops !== n.hops - 1 || (m.direct ? m.addr : m.via) !== n.via) continue;
+      const q = pos.get(m.addr);
+      const d = q && p ? (q.x - p.x) ** 2 + (q.y - p.y) ** 2 : 0;
+      if (d < bestD) {
+        bestD = d;
+        best = m.addr;
+      }
+    }
+    return best || (targets.has(n.via) ? n.via : S.me.addr);
+  }
+
+  function pulse() {
+    const total = S.stats.sent + S.stats.delivered + S.stats.relayed;
+    if (lastTraffic !== null && total > lastTraffic) {
+      const direct = S.nodes.filter((n) => n.direct && pos.has(n.addr));
+      for (let i = 0; i < Math.min(14, total - lastTraffic) && direct.length; i++) {
+        const n = direct[Math.floor(Math.random() * direct.length)];
+        const out = Math.random() < 0.5;
+        particles.push({ from: out ? S.me.addr : n.addr, to: out ? n.addr : S.me.addr, t: -i * 0.07, sky: false });
+      }
+    }
+    lastTraffic = total;
+  }
+
+  function jewel(x, y, r, core, glow, alpha = 1) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 3.2);
+    g.addColorStop(0, glow.replace('A', String(0.55 * alpha)));
+    g.addColorStop(1, glow.replace('A', '0'));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 3.2, 0, Math.PI * 2);
+    ctx.fill();
+    const c = ctx.createRadialGradient(x - r * 0.35, y - r * 0.35, r * 0.1, x, y, r);
+    c.addColorStop(0, '#fff6e0');
+    c.addColorStop(0.35, core);
+    c.addColorStop(1, glow.replace('A', String(0.9 * alpha)));
+    ctx.fillStyle = c;
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x + r * 0.86, y);
+    ctx.lineTo(x, y + r);
+    ctx.lineTo(x - r * 0.86, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  function draw(now) {
+    requestAnimationFrame(draw);
+    if (!W || !S) return;
+    const t = now / 1000;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    for (const [a, tg] of targets) {
+      const p = pos.get(a);
+      p.x += (tg.x - p.x) * 0.12;
+      p.y += (tg.y - p.y) * 0.12;
+    }
+    const { cx, cy, R } = geo();
+    // hop rings
+    ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
+    for (let r = 1; r <= 4; r++) {
+      ctx.strokeStyle = `rgba(212,175,55,${0.075 - r * 0.012})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, R * r, R * r * 0.86, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(143,138,160,.45)';
+      ctx.fillText(r === 4 ? '4+ hops' : hops(r), cx + R * r * 0.72 + 6, cy - R * r * 0.62);
+    }
+    // links
+    for (const tg of targets.values()) {
+      const n = tg.n;
+      if (n.me) continue;
+      const p = pos.get(n.addr);
+      const q = pos.get(parentOf(n));
+      if (!p || !q) continue;
+      ctx.lineWidth = n.direct ? 1.6 : 1.1;
+      ctx.setLineDash(n.direct ? [] : [5, 6]);
+      ctx.strokeStyle = n.online ? (n.direct ? 'rgba(212,175,55,.75)' : 'rgba(212,175,55,.4)') : 'rgba(120,115,140,.25)';
+      ctx.beginPath();
+      ctx.moveTo(q.x, q.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    // the regular internet, and the bridges to it
+    const orb = netOrb();
+    const bridges = [...targets.values()].filter((tg) => tg.n.exit && tg.n.online);
+    for (const tg of bridges) {
+      const p = pos.get(tg.n.addr);
+      ctx.strokeStyle = 'rgba(127,211,230,.55)';
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([3, 7]);
+      ctx.lineDashOffset = -t * 18;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.quadraticCurveTo((p.x + orb.x) / 2, Math.min(p.y, orb.y) - 30, orb.x, orb.y);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+    const og = ctx.createRadialGradient(orb.x, orb.y, 2, orb.x, orb.y, 46);
+    og.addColorStop(0, `rgba(127,211,230,${bridges.length ? 0.42 : 0.14})`);
+    og.addColorStop(1, 'rgba(127,211,230,0)');
+    ctx.fillStyle = og;
+    ctx.beginPath();
+    ctx.arc(orb.x, orb.y, 46, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(127,211,230,${bridges.length ? 0.85 : 0.3})`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(orb.x, orb.y, 17, 0, Math.PI * 2);
+    ctx.stroke();
+    for (let k = 0; k < 3; k++) {
+      ctx.beginPath();
+      ctx.ellipse(orb.x, orb.y, Math.abs(Math.cos(t * 0.6 + k * 1.05)) * 17, 17, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.fillStyle = bridges.length ? '#c9f1fa' : 'rgba(143,138,160,.7)';
+    ctx.textAlign = 'center';
+    ctx.fillText('the internet', orb.x, orb.y + 34);
+    ctx.textAlign = 'left';
+    // traffic sparks
+    particles = particles.filter((pt) => pt.t < 1);
+    for (const pt of particles) {
+      pt.t += 0.022;
+      if (pt.t < 0) continue;
+      const a = pos.get(pt.from);
+      const b = pos.get(pt.to);
+      if (!a || !b) continue;
+      const x = a.x + (b.x - a.x) * pt.t;
+      const y = a.y + (b.y - a.y) * pt.t;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, 7);
+      g.addColorStop(0, 'rgba(255,214,150,.95)');
+      g.addColorStop(1, 'rgba(255,153,51,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, 7, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // jewels
+    for (const tg of [...targets.values()].sort((a, b) => Number(!!a.n.me) - Number(!!b.n.me))) {
+      const n = tg.n;
+      const p = pos.get(n.addr);
+      const r = n.me ? 12 + Math.sin(t * 2) * 0.8 : 8;
+      if (n.online) jewel(p.x, p.y, r, n.me ? '#ffb347' : '#e8c766', n.me ? 'rgba(255,153,51,A)' : 'rgba(212,175,55,A)');
+      else {
+        ctx.strokeStyle = 'rgba(143,138,160,.6)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y - r);
+        ctx.lineTo(p.x + r * 0.86, p.y);
+        ctx.lineTo(p.x, p.y + r);
+        ctx.lineTo(p.x - r * 0.86, p.y);
+        ctx.closePath();
+        ctx.stroke();
+      }
+      if (n.exit) {
+        ctx.strokeStyle = 'rgba(127,211,230,.85)';
+        ctx.lineWidth = 1.3;
+        ctx.setLineDash([4, 4]);
+        ctx.lineDashOffset = -t * 10;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r + 7, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.lineDashOffset = 0;
+      }
+      if (hover === n.addr || sel === n.addr) {
+        ctx.strokeStyle = 'rgba(255,210,158,.9)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r + 12, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.textAlign = 'center';
+      ctx.font = `${n.me ? 600 : 500} 12px ui-sans-serif, system-ui, sans-serif`;
+      ctx.fillStyle = n.online ? '#ebe5d8' : 'rgba(143,138,160,.8)';
+      ctx.fillText(n.me ? n.name + ' (you)' : n.name, p.x, p.y + r + 18);
+      if (n.site) {
+        ctx.font = 'italic 11px ui-serif, Georgia, serif';
+        ctx.fillStyle = 'rgba(212,175,55,.85)';
+        const title = n.site.title.length > 26 ? n.site.title.slice(0, 25) + '…' : n.site.title;
+        ctx.fillText('◇ ' + title, p.x, p.y + r + 32);
+      }
+      ctx.textAlign = 'left';
+    }
+  }
+  requestAnimationFrame(draw);
+
+  function hit(e) {
+    const r = cv.getBoundingClientRect();
+    const x = e.clientX - r.left;
+    const y = e.clientY - r.top;
+    let best = null;
+    let bd = 22 * 22;
+    for (const [a, p] of pos) {
+      const d = (p.x - x) ** 2 + (p.y - y) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = a;
+      }
+    }
+    return best;
+  }
+  cv.addEventListener('mousemove', (e) => {
+    hover = hit(e);
+    cv.style.cursor = hover ? 'pointer' : 'default';
+  });
+  cv.addEventListener('click', (e) => {
+    sel = hit(e);
+    renderCard();
+  });
+
+  function renderStats() {
+    const online = S.nodes.filter((n) => n.online).length;
+    setHTML($('stats'), `<b>${online}</b> node${online === 1 ? '' : 's'} reachable · <b>${S.links.length}</b> direct link${S.links.length === 1 ? '' : 's'}<br><b>${S.sites.filter((s) => s.online).length}</b> site${S.sites.filter((s) => s.online).length === 1 ? '' : 's'} online · <b>${S.bridge.exits.length + (S.bridge.exit ? 1 : 0)}</b> bridge${S.bridge.exits.length + (S.bridge.exit ? 1 : 0) === 1 ? '' : 's'} to the internet<br>relayed for others: <b>${S.stats.relayed}</b>`);
+  }
+
+  function renderCard() {
+    const el = $('card');
+    if (!sel || !S) {
+      el.style.display = 'none';
+      return;
+    }
+    const me = sel === S.me.addr;
+    const n = me ? { addr: S.me.addr, name: S.me.name, online: true, hops: 0, site: S.me.site, exit: S.me.exit, mirrors: S.me.mirrors } : nodeBy(sel);
+    if (!n) {
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'block';
+    const where = me ? 'this is you' : n.online ? `${hops(n.hops)} away${n.direct ? ' · direct link' : ` · through ${esc(nameOf(n.via))}`}` : `offline · last heard ${ago(n.seen)}`;
+    setHTML(el, `<div class="card"><div class="row" style="justify-content:space-between"><h3>${esc(n.name)}</h3><button class="btn ghost small" data-act="unselect">✕</button></div>
+      <div class="addr">${n.addr}</div>
+      <div class="muted" style="margin:8px 0;font-size:12.5px">${where}${n.site ? `<br>site: <span style="color:var(--gold)">${esc(n.site.title)}</span>` : ''}${n.exit ? '<br><span class="skyt">shares its internet</span>' : ''}${n.mirrors && n.mirrors.length ? `<br>keeps ${n.mirrors.length} site${n.mirrors.length === 1 ? '' : 's'} alive` : ''}</div>
+      <div class="row">${n.site ? `<button class="btn small" data-act="visit" data-addr="${n.addr}">Visit site</button>` : ''}
+      ${me ? '' : `<button class="btn ghost small" data-act="chat" data-addr="${n.addr}">Message</button><button class="btn ghost small" data-act="ping" data-addr="${n.addr}">Ping</button>`}</div></div>`);
+  }
+
+  tick();
+})();
+</script>
+</body>
+</html>

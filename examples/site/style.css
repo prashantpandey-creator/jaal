@@ -1,0 +1,18 @@
+:root { color-scheme: dark; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(900px 520px at 50% -8%, #2a1806 0, #07060b 62%);
+  color: #ebe5d8;
+  font: 17px/1.7 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  display: flex;
+  justify-content: center;
+}
+main { max-width: 680px; padding: 64px 26px; }
+img { display: block; margin: 0 0 18px; filter: drop-shadow(0 0 22px rgba(255, 153, 51, .55)); }
+h1 { font: 500 34px/1.2 ui-serif, "Iowan Old Style", Palatino, Georgia, serif; color: #ffb347; margin: 0 0 14px; letter-spacing: .01em; }
+.lead { font-size: 19px; color: #d9d1c1; }
+ul { padding-left: 20px; }
+li { margin: 0 0 12px; }
+li b { color: #ffd29e; font-weight: 600; }
+a { color: #ffb347; }

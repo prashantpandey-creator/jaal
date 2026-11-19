@@ -1,0 +1,15 @@
+{
+  "name": "jaal",
+  "version": "0.1.0",
+  "description": "Jāla — your own internet: a peer-to-peer mesh with its own addresses, sites and messages, that also bridges into the regular internet. Zero dependencies.",
+  "license": "MIT",
+  "bin": { "jaal": "bin/jaal.js" },
+  "main": "src/index.js",
+  "files": ["bin", "src", "examples", "README.md", "LICENSE"],
+  "scripts": {
+    "test": "node --test --test-timeout=60000 test/*.test.js",
+    "start": "node bin/jaal.js start"
+  },
+  "engines": { "node": ">=20" },
+  "keywords": ["mesh", "p2p", "overlay-network", "offline-first", "decentralized", "proxy", "internet"]
+}
