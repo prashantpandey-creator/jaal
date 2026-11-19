@@ -1,20 +1,24 @@
 'use strict';
-// The bridge between Jāla and the regular internet — both directions.
+// The bridge between Jāla and the regular internet (and Tor) — both directions.
 //
 //   exit      a node that has internet carries other nodes' TCP streams out to the world.
 //             Off by default. Refuses to run open on the public net unless you say --exit-open.
-//             Never dials private / local addresses (see netpolicy.js).
+//             Never dials private / local addresses (see netpolicy.js). With Tor on the exit
+//             (--exit --tor) it also opens .onion sites, and any stream that asks for Tor.
 //   proxy     a local HTTP + HTTPS (CONNECT) proxy. Point any browser or app at it and
 //               - normal sites go through the nearest exit, across the mesh
+//               - .onion sites go through Tor (this node's, or a Jāla exit's)
 //               - http://<address>.jaal/ opens Jāla sites directly
-//             HTTPS stays end-to-end TLS between your browser and the real site: relays and the
-//             exit only ever see encrypted bytes.
-//   webcheck  a one-shot "can I reach the internet through the net?" probe for the portal.
+//             --tor-all sends ALL internet traffic through Tor and fails closed: no Tor, nothing sent.
+//             HTTPS stays end-to-end TLS between the browser and the real site.
+//   fetchVia  one request through the same paths (portal probe, Tor check, the no-JavaScript reader).
 //   (gateway  — the other direction, normal browsers reading Jāla sites — lives in web.js)
 const http = require('node:http');
 const tls = require('node:tls');
+const zlib = require('node:zlib');
 const { dialOut } = require('./netpolicy');
 const { makeContentHandler } = require('./web');
+const { isOnion, maskOnion } = require('./tor');
 
 const HOP = ['connection', 'proxy-connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade'];
 const strip = (h) => {
@@ -22,6 +26,8 @@ const strip = (h) => {
   for (const k of HOP) delete o[k];
   return o;
 };
+// What Tor Browser sends, so requests made through Tor don't stand out more than they must.
+const TOR_UA = 'Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0';
 
 // Join two byte streams both ways. Errors tear both down; a clean end is passed along.
 function splice(a, b) {
@@ -40,17 +46,60 @@ function splice(a, b) {
   b.on('close', () => !a.destroyed && !a.writableFinished && a.end());
 }
 
+function decodeBody(buf, encoding) {
+  const enc = String(encoding || '').toLowerCase().trim();
+  try {
+    if (enc === 'gzip' || enc === 'x-gzip') return zlib.gunzipSync(buf);
+    if (enc === 'br') return zlib.brotliDecompressSync(buf);
+    if (enc === 'deflate') {
+      try {
+        return zlib.inflateSync(buf);
+      } catch {
+        return zlib.inflateRawSync(buf);
+      }
+    }
+  } catch {
+    return buf;
+  }
+  return buf;
+}
+
+const connected = (s) => new Promise((resolve, reject) => {
+  s.once('connect', resolve);
+  s.once('error', reject);
+});
+
 class Bridge {
   constructor(node, sites, opts = {}) {
     this.node = node;
     this.sites = sites;
-    this.opts = { via: null, ...opts };
+    this.opts = { via: null, torAll: false, ...opts };
     this.policy = null;
+    this.tor = null;
     this.proxyPort = null;
     this.proxyHost = null;
     this.gatewayPort = null;
     this.exitLog = [];
     this.content = makeContentHandler(node, sites);
+  }
+
+  // ------------------------------------------------------------------ Tor on this node
+
+  useTor(tor) {
+    this.tor = tor;
+    this.node.onionDialer = (host, port) => tor.connect(host, port);
+    this.node.on('tor-ready', () => {
+      if (this.policy) {
+        this.node.exit = { ports: this.policy.ports, tor: true };
+        this.node.announce(); // tell the net: this exit opens .onion sites now
+      }
+    });
+    return this;
+  }
+
+  setTorAll(on) {
+    this.opts.torAll = !!on;
+    return { torAll: this.opts.torAll };
   }
 
   // ------------------------------------------------------------------ exit
@@ -60,7 +109,7 @@ class Bridge {
       throw new Error('refusing to run an open internet exit on the public net — start with --net <secret> so only your nodes can use it, or pass --exit-open');
     }
     this.policy = { ports: ports.map(Number).filter((p) => p > 0 && p < 65536), lan: !!lan, open: !!open };
-    this.node.exit = { ports: this.policy.ports };
+    this.node.exit = { ports: this.policy.ports, tor: !!(this.tor && this.tor.ready) };
     this.node.streamHandler = (src, m) => this._exitStream(src, m);
     this.node.announce();
   }
@@ -75,15 +124,19 @@ class Bridge {
     let mine = 0;
     for (const s of node.streams.values()) if (s.peer === src) mine++;
     if (mine >= 64) return fail('too many open streams from you');
+    const onion = isOnion(host);
+    const viaTor = onion || m.tor === true;
+    if (viaTor && !(this.tor && this.tor.ready)) return fail(onion ? 'this exit has no Tor, so it cannot open .onion sites' : 'this exit has no Tor');
     let sock;
     try {
-      sock = await dialOut(host, port, this.policy);
+      // Through Tor, names are resolved by Tor and Tor refuses internal addresses itself.
+      sock = viaTor ? await this.tor.connect(host, port, { waitMs: 5000 }) : await dialOut(host, port, this.policy);
     } catch (e) {
       return fail(e.message || e.code || 'connect failed');
     }
     if (node.stopped) return sock.destroy();
-    node.log(`exit  ${node.nameOf(src)} → ${host}:${port}`);
-    this.exitLog.unshift({ from: src, host, port, at: Date.now() });
+    node.log(`exit  ${node.nameOf(src)} → ${maskOnion(host)}:${port}${viaTor ? '  via Tor' : ''}`);
+    this.exitLog.unshift({ from: src, host: maskOnion(host), port, tor: viaTor, at: Date.now() });
     this.exitLog.length = Math.min(this.exitLog.length, 50);
     const ms = node.acceptStream(src, m.sid);
     sock.setTimeout(300_000, () => sock.destroy());
@@ -92,27 +145,50 @@ class Bridge {
 
   // ------------------------------------------------------------------ getting out
 
-  pickExit(port) {
+  pickExit(port, { tor = false } = {}) {
     if (this.opts.via) return this.opts.via;
-    const ex = this.node.exits().filter((e) => e.ports.includes(port));
+    const ex = this.node.exits().filter((e) => e.ports.includes(port) && (!tor || e.tor));
     return ex.length ? ex[0].addr : null;
   }
 
-  // A byte stream to host:port on the internet: across the mesh to an exit, or straight out if
-  // this node is an exit itself.
-  async dial(host, port) {
+  // A byte stream to host:port. .onion (and everything, in Tor-only mode) goes through Tor: this
+  // node's own if it has one, else a Jāla exit that has one. Never silently over a plain exit.
+  async dial(host, port, { tor = false } = {}) {
+    const onion = isOnion(host);
+    if (onion || tor || this.opts.torAll) {
+      const exit = this.pickExit(port, { tor: true });
+      const local = this.tor && ['starting', 'ready'].includes(this.tor.state);
+      if (local && (this.tor.ready || !exit)) {
+        const s = await this.tor.connect(host, port, { waitMs: 20_000 });
+        s.viaTor = 'self';
+        return s;
+      }
+      if (!exit) {
+        throw new Error(onion
+          ? 'no Tor on this node or the net — start this node with --tor, or an exit with --exit --tor'
+          : 'Tor-only mode is on, but no Tor is reachable — nothing was sent');
+      }
+      const s = this.node.openStream(exit, host, port, { tor: true });
+      await connected(s);
+      s.exitAddr = exit;
+      s.viaTor = 'exit';
+      return s;
+    }
     if (this.policy && !this.opts.via) return dialOut(host, port, this.policy);
     const exit = this.pickExit(port);
     if (!exit) {
       throw new Error(this.node.exits().length ? `no exit on the net opens port ${port}` : 'no internet exit on the net yet — start one node with --exit');
     }
     const s = this.node.openStream(exit, host, port);
-    await new Promise((resolve, reject) => {
-      s.once('connect', resolve);
-      s.once('error', reject);
-    });
+    await connected(s);
     s.exitAddr = exit;
     return s;
+  }
+
+  _via(raw) {
+    if (raw.viaTor === 'self') return { tor: true, self: true, name: this.node.opts.name, hops: 0 };
+    if (raw.exitAddr) return { tor: raw.viaTor === 'exit', addr: raw.exitAddr, name: this.node.nameOf(raw.exitAddr), hops: this.node.nodes.get(raw.exitAddr)?.hops ?? 1 };
+    return { tor: false, self: true, name: this.node.opts.name, hops: 0 };
   }
 
   // ------------------------------------------------------------------ local proxy
@@ -197,58 +273,83 @@ class Bridge {
     splice(client, up);
   }
 
-  // ------------------------------------------------------------------ probe
+  // ------------------------------------------------------------------ one request through the same paths
 
-  async webcheck(url) {
+  async fetchVia(url, { method = 'GET', headers = {}, body = null, tor = false, maxBytes = 15 << 20, timeoutMs = 90_000 } = {}) {
     const u = new URL(url);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('http(s) addresses only');
     const t0 = Date.now();
     const port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
-    const raw = await this.dial(u.hostname, port);
-    const via = raw.exitAddr
-      ? { addr: raw.exitAddr, name: this.node.nameOf(raw.exitAddr), hops: this.node.nodes.get(raw.exitAddr)?.hops ?? 1 }
-      : { self: true, name: this.node.opts.name, hops: 0 };
-    const sock = u.protocol === 'https:' ? tls.connect({ socket: raw, servername: u.hostname, ALPNProtocols: ['http/1.1'] }) : raw;
+    const onion = isOnion(u.hostname);
+    const raw = await this.dial(u.hostname, port, { tor });
+    const via = this._via(raw);
+    // An onion address IS the server's key, so Tor already proved who answers; CA certificates
+    // (often self-signed on onions) are only checked for the regular internet.
+    const sock = u.protocol === 'https:' ? tls.connect({ socket: raw, servername: u.hostname, ALPNProtocols: ['http/1.1'], rejectUnauthorized: !onion }) : raw;
     return new Promise((resolve, reject) => {
       const req = http.request({
-        method: 'GET',
+        method,
         path: u.pathname + u.search,
-        headers: { host: u.host, 'user-agent': 'jaal/0.1', accept: 'text/html,*/*', connection: 'close' },
+        headers: {
+          host: u.host, 'user-agent': via.tor ? TOR_UA : 'jaal/0.2', accept: 'text/html,application/xhtml+xml,*/*;q=0.8',
+          'accept-language': 'en-US,en;q=0.5', 'accept-encoding': 'identity', connection: 'close', ...headers,
+        },
         createConnection: () => sock,
       });
-      const timer = setTimeout(() => req.destroy(new Error('timed out')), 20_000);
+      const timer = setTimeout(() => req.destroy(new Error('timed out')), timeoutMs);
       req.on('response', (r) => {
-        let body = '';
-        r.setEncoding('utf8');
+        const parts = [];
+        let n = 0;
         r.on('data', (d) => {
-          if (body.length < 200_000) body += d;
+          n += d.length;
+          if (n > maxBytes) req.destroy(new Error('response too large'));
+          else parts.push(d);
         });
         r.on('end', () => {
           clearTimeout(timer);
-          const t = /<title[^>]*>([^<]{0,200})/i.exec(body);
-          resolve({
-            url: u.href, status: r.statusCode, title: t ? t[1].trim() : null, ms: Date.now() - t0, bytes: body.length, via,
-            tls: u.protocol === 'https:' ? { verified: sock.authorized === true, cert: sock.getPeerCertificate()?.subject?.CN || null } : null,
-          });
+          const tlsInfo = u.protocol === 'https:' ? { verified: sock.authorized === true, cert: sock.getPeerCertificate()?.subject?.CN || null } : null;
+          resolve({ url: u.href, status: r.statusCode, headers: r.headers, body: decodeBody(Buffer.concat(parts), r.headers['content-encoding']), ms: Date.now() - t0, via, tls: tlsInfo, onion });
         });
       });
       req.on('error', (e) => {
         clearTimeout(timer);
         reject(e);
       });
-      req.end();
+      req.end(body || undefined);
     });
+  }
+
+  async webcheck(url) {
+    if (!/^[a-z]+:\/\//i.test(url)) url = 'http://' + url;
+    const r = await this.fetchVia(url, { maxBytes: 2 << 20 });
+    const t = /<title[^>]*>([^<]{0,200})/i.exec(r.body.toString('utf8'));
+    return { url: r.url, status: r.status, title: t ? t[1].trim() : null, ms: r.ms, bytes: r.body.length, via: r.via, tls: r.tls, onion: r.onion };
+  }
+
+  // Ask the Tor Project's own checker whether our traffic really arrives from the Tor network.
+  async torcheck() {
+    const r = await this.fetchVia('https://check.torproject.org/api/ip', { tor: true, maxBytes: 64 << 10 });
+    let j = {};
+    try {
+      j = JSON.parse(r.body.toString('utf8'));
+    } catch { /* not JSON */ }
+    return { isTor: j.IsTor === true, ip: j.IP || null, status: r.status, ms: r.ms, via: r.via };
   }
 
   info() {
     return {
-      exit: this.policy ? { ports: this.policy.ports, open: this.policy.open, recent: this.exitLog.slice(0, 10).map((x) => ({ ...x, from: this.node.nameOf(x.from) })) } : null,
+      exit: this.policy ? {
+        ports: this.policy.ports, open: this.policy.open, tor: !!(this.tor && this.tor.ready),
+        recent: this.exitLog.slice(0, 10).map((x) => ({ ...x, from: this.node.nameOf(x.from) })),
+      } : null,
       proxy: this.proxyPort ? { host: this.proxyHost, port: this.proxyPort } : null,
       gateway: this.gatewayPort ? { port: this.gatewayPort } : null,
       via: this.opts.via,
       exits: this.node.exits(),
+      tor: this.tor ? this.tor.info() : null,
+      torAll: this.opts.torAll,
     };
   }
 }
 
-module.exports = { Bridge, splice };
+module.exports = { Bridge, splice, decodeBody };

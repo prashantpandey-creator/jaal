@@ -51,6 +51,7 @@ class Link extends EventEmitter {
     socket.on('data', (d) => this._onData(d));
     socket.on('error', (e) => this.close(e.code || e.message));
     socket.on('close', () => this.close('connection closed'));
+    socket.resume(); // a socket handed over by a SOCKS dialer arrives paused
     this.hsTimer = setTimeout(() => this.close('handshake timeout'), HANDSHAKE_MS);
     this.hsTimer.unref?.();
     this._frame(Buffer.from(JSON.stringify({ jaal: 1, eph: this.ephRaw.toString('base64') })));

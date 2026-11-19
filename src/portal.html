@@ -22,6 +22,7 @@ header{display:flex;align-items:center;gap:18px;padding:13px 22px;border-bottom:
 .btn:hover{background:rgba(255,153,51,.22)}
 .btn.ghost{background:transparent;border-color:var(--line);color:var(--text)}
 .btn.sky{background:rgba(127,211,230,.1);border-color:rgba(127,211,230,.45);color:#c9f1fa}
+.btn.violet{background:rgba(179,157,219,.12);border-color:rgba(179,157,219,.45);color:#e4dafc}
 .btn.small{padding:4px 11px;font-size:12px}
 .me{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;white-space:nowrap}
 .pill{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:999px;padding:5px 12px;cursor:pointer}
@@ -73,6 +74,8 @@ th{color:var(--muted);font-weight:500}
 .tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:999px;padding:0 7px;margin-right:4px;color:var(--muted)}
 .tag.sky{border-color:rgba(127,211,230,.4);color:var(--sky)}
 .tag.gold{border-color:rgba(212,175,55,.45);color:var(--gold)}
+.tag.violet{border-color:rgba(179,157,219,.5);color:#c9b8f0}
+.legend i.vio{border-top:2px dashed #b39ddb}
 #viewer{position:fixed;inset:0;background:rgba(4,3,8,.88);backdrop-filter:blur(6px);display:none;flex-direction:column;z-index:10}
 #viewer.on{display:flex}
 .vbar{display:flex;align-items:center;gap:12px;padding:10px 16px}
@@ -86,7 +89,7 @@ th{color:var(--muted);font-weight:500}
 <body>
 <header>
   <div class="brand"><b>◈ JĀLA</b><span>your own internet</span></div>
-  <form class="bar" id="go"><input id="url" placeholder="jaal://address/page  —  or an https:// address to reach through the net" autocomplete="off" spellcheck="false"><button class="btn">Go</button></form>
+  <form class="bar" id="go"><input id="url" placeholder="jaal://address  ·  an .onion address  ·  or any https:// page — read through the net" autocomplete="off" spellcheck="false"><button class="btn">Go</button></form>
   <div class="me"><span class="pill" id="mePill" title="Copy your address"><span class="dot" id="meDot"></span><span id="meName">connecting…</span><span class="addr" id="meAddr"></span></span></div>
 </header>
 <main>
@@ -94,7 +97,7 @@ th{color:var(--muted);font-weight:500}
     <canvas id="map" aria-label="Map of the net"></canvas>
     <div class="stats" id="stats"></div>
     <div id="card"></div>
-    <div class="legend"><span><i></i>your links</span><span><i class="dash"></i>reached through a neighbour</span><span><i class="skyl"></i>bridge to the regular internet</span><span><span class="dot on"></span> online</span><span><span class="dot"></span> offline</span></div>
+    <div class="legend"><span><i></i>your links</span><span><i class="dash"></i>reached through a neighbour</span><span><i class="skyl"></i>bridge to the regular internet</span><span><i class="vio"></i>through Tor</span><span><span class="dot on"></span> online</span><span><span class="dot"></span> offline</span></div>
   </section>
   <section class="panel side">
     <nav class="tabs">
@@ -132,6 +135,14 @@ th{color:var(--muted);font-weight:500}
         <button class="btn sky">Reach it through Jāla</button>
         <div id="checkOut" style="margin-top:10px"></div>
       </form>
+      <div class="item" id="torCard">
+        <div class="row" style="justify-content:space-between"><div class="t">Tor · .onion sites</div><span class="tag violet" id="torTag">off</span></div>
+        <div id="torInfo" class="muted" style="font-size:12.5px;margin:4px 0 10px"></div>
+        <label class="row" style="font-size:13px;margin-bottom:10px;cursor:pointer"><input type="checkbox" id="torAll"> Send all internet traffic through Tor — if Tor isn't reachable, nothing is sent</label>
+        <div class="row"><button class="btn violet" type="button" data-act="torcheck">Check Tor</button><button class="btn ghost" type="button" data-act="toronion">Open the Tor Project's onion</button></div>
+        <div id="torOut" style="margin-top:10px"></div>
+        <p class="muted" style="font-size:12px;margin:10px 0 0">The reader shows pages with no JavaScript and keeps no cookies. Through your browser's proxy .onion sites open too, but that is not Tor Browser: for anonymity from the sites themselves, use Tor Browser.</p>
+      </div>
       <h2>Exits — nodes sharing their internet</h2>
       <div id="exitList"></div>
       <div id="exitMine"></div>
@@ -162,6 +173,8 @@ th{color:var(--muted);font-weight:500}
   'use strict';
   const TOKEN = '__TOKEN__';
   const CONTENT = '__CONTENT__';
+  const READER = '__READER__';
+  const TORPROJECT_ONION = 'http://2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion/'; // from torproject.org's own Onion-Location header
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const short = (a) => (a ? a.slice(0, 6) + '…' + a.slice(-4) : '');
@@ -177,6 +190,14 @@ th{color:var(--muted);font-weight:500}
       body: body ? JSON.stringify(body) : undefined,
     });
     const j = await r.json().catch(() => ({}));
+    if (r.status === 401) {
+      // the node restarted, and its page now carries a fresh secret: load the fresh page (at most 3 tries)
+      const n = Number(sessionStorage.getItem('jaal-reloads') || 0);
+      if (n < 3) {
+        sessionStorage.setItem('jaal-reloads', String(n + 1));
+        location.reload();
+      }
+    }
     if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
     return j;
   }
@@ -203,6 +224,7 @@ th{color:var(--muted);font-weight:500}
   async function tick() {
     try {
       S = await api('status');
+      sessionStorage.removeItem('jaal-reloads');
       $('meDot').className = 'dot on';
       $('meName').textContent = S.me.name;
       $('meAddr').textContent = short(S.me.addr);
@@ -273,10 +295,36 @@ th{color:var(--muted);font-weight:500}
     $('vAddr').textContent = 'jaal://' + addr + p;
     $('vSrc').textContent = !n ? 'looking for it…' : n.hops === 0 ? 'served by your node' : n.online ? `from ${n.name} · ${hops(n.hops)}` : `${n.name} is offline — from a mirror or your copy`;
     const url = CONTENT + '/' + addr + p;
+    $('frame').setAttribute('sandbox', 'allow-scripts allow-forms allow-popups allow-same-origin');
     $('frame').src = url;
     $('vOpen').href = url;
     $('viewer').classList.add('on');
     $('url').value = 'jaal://' + addr + p;
+  }
+  const isOnionUrl = (u) => /\.onion(?::\d+)?$/i.test(String(u).replace(/^[a-z]+:\/\//i, '').split(/[/?#]/)[0]);
+  function readerRoute(onion) {
+    const b = S && S.bridge;
+    if (!b) return '';
+    const torExit = b.exits.find((e) => e.tor);
+    if (onion || b.torAll) {
+      if (b.tor && b.tor.state === 'ready') return 'through Tor on this node';
+      if (torExit) return `through Tor on ${torExit.name}, ${hops(torExit.hops)}`;
+      return b.tor && b.tor.state === 'starting' ? `Tor is starting (${b.tor.progress}%)…` : 'no Tor reachable — start a node with --tor';
+    }
+    if (b.exit) return 'straight out of this node';
+    return b.exits[0] ? `through ${b.exits[0].name}, ${hops(b.exits[0].hops)}` : 'no internet exit on the net yet';
+  }
+  function openReader(url) {
+    const onion = isOnionUrl(url);
+    $('vTitle').textContent = (onion ? 'Onion site' : 'Web page') + ' — reader: no JavaScript, no cookies';
+    $('vAddr').textContent = url;
+    $('vSrc').textContent = readerRoute(onion);
+    const src = READER + url;
+    $('frame').setAttribute('sandbox', 'allow-forms allow-same-origin');
+    $('frame').src = src;
+    $('vOpen').href = src;
+    $('viewer').classList.add('on');
+    $('url').value = url;
   }
   function closeViewer() {
     $('viewer').classList.remove('on');
@@ -289,14 +337,12 @@ th{color:var(--muted);font-weight:500}
     if (!v) return;
     const m = /^(?:jaal:\/\/)?([a-z2-7]{32})(\/.*)?$/i.exec(v) || /^https?:\/\/([a-z2-7]{32})\.jaal(\/.*)?$/i.exec(v);
     if (m) return openSite(m[1].toLowerCase(), m[2] || '/');
-    if (/^https?:\/\//i.test(v)) {
-      switchTab('net');
-      $('checkUrl').value = v;
-      return runCheck();
-    }
+    const onion = /^(https?:\/\/)?([a-z0-9.-]+\.onion(?::\d+)?)(\/\S*)?$/i.exec(v);
+    if (onion) return openReader((onion[1] || 'http://') + onion[2] + (onion[3] || '/'));
+    if (/^https?:\/\//i.test(v)) return openReader(v);
     const byName = S && S.nodes.find((n) => n.name.toLowerCase() === v.toLowerCase() && n.site);
     if (byName) return openSite(byName.addr);
-    toast('Jāla addresses are 32 letters (a–z, 2–7). Or type an https:// address to reach it through the net.', true);
+    toast('Type a jaal:// address (32 letters), an .onion address, or an https:// page.', true);
   });
 
   // ------------------------------------------------------------ messages
@@ -364,10 +410,21 @@ th{color:var(--muted);font-weight:500}
     setHTML($('proxyInfo'), b.proxy
       ? `Set <code>${b.proxy.host}:${b.proxy.port}</code> as the HTTP and HTTPS proxy (browser or system settings). Everything then travels the net; <code>http://&lt;address&gt;.jaal/</code> opens Jāla sites directly.<pre class="code">curl -x http://${b.proxy.host}:${b.proxy.port} https://example.com</pre>`
       : 'The local proxy is off — start with <code>--proxy 8118</code>.');
-    setHTML($('exitList'), ex.length ? ex.map((x) => `<div class="item"><div class="row" style="justify-content:space-between"><div class="t">${esc(x.name)}</div><span class="tag sky">ports ${x.ports.join(', ')}</span></div><div class="muted" style="font-size:12px">${hops(x.hops)} away · <span class="addr">${short(x.addr)}</span>${S.bridge.via === x.addr ? ' · pinned with --via' : ''}</div></div>`).join('')
+    const tor = b.tor;
+    const torExits = ex.filter((x) => x.tor);
+    setHTML($('torTag'), !tor ? (torExits.length ? 'via the net' : 'off') : tor.state === 'ready' ? 'ready' : tor.state === 'starting' ? `starting ${tor.progress}%` : tor.state === 'missing' ? 'not installed' : tor.state);
+    const viaNet = torExits.length ? ` ${esc(torExits[0].name)} (${hops(torExits[0].hops)}) opens .onion sites for the net.` : '';
+    setHTML($('torInfo'), tor && tor.state === 'ready'
+      ? `This node runs Tor (${tor.source === 'jaal' ? 'its own, stopped with the node' : 'the Tor already running on this machine'}).${tor.onion ? ` It is also an onion service — peers anywhere can link to <code>${esc(tor.onion)}:4747</code>, no public IP needed.` : ''}`
+      : tor && tor.state === 'starting' ? `Tor is starting… ${tor.progress}%.${viaNet}`
+        : tor && tor.state === 'missing' ? `Tor isn't installed on this machine (<code>brew install tor</code>).${viaNet}`
+          : tor && tor.error ? `Tor: ${esc(tor.error)}.${viaNet}`
+            : torExits.length ? `No Tor on this node, but${viaNet}` : 'Start this node with <code>--tor</code>, or an exit with <code>--exit --tor</code>, to open .onion sites.');
+    if (document.activeElement !== $('torAll')) $('torAll').checked = !!b.torAll;
+    setHTML($('exitList'), ex.length ? ex.map((x) => `<div class="item"><div class="row" style="justify-content:space-between"><div class="t">${esc(x.name)}</div><span>${x.tor ? '<span class="tag violet">Tor</span>' : ''}<span class="tag sky">ports ${x.ports.join(', ')}</span></span></div><div class="muted" style="font-size:12px">${hops(x.hops)} away · <span class="addr">${short(x.addr)}</span>${S.bridge.via === x.addr ? ' · pinned with --via' : ''}</div></div>`).join('')
       : '<p class="muted">None visible.</p>');
     setHTML($('exitMine'), b.exit && b.exit.recent.length
-      ? `<h2>Carried out recently</h2><table><tr><th>for</th><th>to</th><th>when</th></tr>${b.exit.recent.map((r) => `<tr><td>${esc(r.from)}</td><td><code>${esc(r.host)}:${r.port}</code></td><td class="muted">${ago(Date.now() - r.at)}</td></tr>`).join('')}</table>`
+      ? `<h2>Carried out recently</h2><table><tr><th>for</th><th>to</th><th>when</th></tr>${b.exit.recent.map((r) => `<tr><td>${esc(r.from)}</td><td><code>${esc(r.host)}:${r.port}</code>${r.tor ? ' <span class="tag violet">Tor</span>' : ''}</td><td class="muted">${ago(Date.now() - r.at)}</td></tr>`).join('')}</table>`
       : '');
   }
   async function runCheck() {
@@ -377,6 +434,26 @@ th{color:var(--muted);font-weight:500}
       const r = await api('webcheck', { url: $('checkUrl').value.trim() });
       const via = r.via.self ? 'straight out of this node (it is the exit)' : `via ${esc(r.via.name)}, ${hops(r.via.hops)} across the net`;
       out.innerHTML = `<div class="ok">✓ ${r.status} · ${r.title ? '“' + esc(r.title) + '”' : esc(r.url)} · ${r.ms} ms</div><div class="muted" style="font-size:12px">${via}${r.tls ? ` · TLS ${r.tls.verified ? 'verified' : 'NOT verified'}${r.tls.cert ? ' for ' + esc(r.tls.cert) : ''} — the exit saw only ciphertext` : ''}</div>`;
+    } catch (err) {
+      out.innerHTML = `<div class="bad">✗ ${esc(err.message)}</div>`;
+    }
+  }
+  $('torAll').addEventListener('change', async (e) => {
+    try {
+      const r = await api('tor', { all: e.target.checked });
+      toast(r.torAll ? 'All internet traffic now goes through Tor — or nowhere' : 'Regular exits again for normal sites (.onion still uses Tor)');
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+  async function runTorCheck() {
+    const out = $('torOut');
+    out.innerHTML = '<span class="muted">asking check.torproject.org through Tor…</span>';
+    try {
+      const r = await api('torcheck', {});
+      out.innerHTML = r.isTor
+        ? `<div class="ok">✓ The Tor Project sees this traffic coming from the Tor network</div><div class="muted" style="font-size:12px">exit relay ${esc(r.ip)} · ${r.ms} ms · ${r.via.self ? 'Tor on this node' : `Tor on ${esc(r.via.name)}, ${hops(r.via.hops)}`}</div>`
+        : `<div class="bad">✗ Not arriving from Tor (seen as ${esc(r.ip || '?')})</div>`;
     } catch (err) {
       out.innerHTML = `<div class="bad">✗ ${esc(err.message)}</div>`;
     }
@@ -448,6 +525,10 @@ th{color:var(--muted);font-weight:500}
         await api('mirror', { addr, off: true });
         toast('No longer keeping it');
         tick();
+      } else if (act === 'torcheck') {
+        runTorCheck();
+      } else if (act === 'toronion') {
+        openReader(TORPROJECT_ONION);
       } else if (act === 'unselect') {
         sel = null;
         renderCard();
@@ -491,12 +572,13 @@ th{color:var(--muted);font-weight:500}
 
   const geo = () => ({ cx: W * 0.45, cy: H * 0.53, R: Math.max(46, Math.min(W, H) * 0.155) });
   const netOrb = () => ({ x: W - 74, y: 74 });
+  const torOrb = () => ({ x: W - 74, y: H - 96 });
 
   function relayout() {
     if (!S || !W) return;
     const { cx, cy, R } = geo();
     const T = new Map();
-    T.set(S.me.addr, { x: cx, y: cy, n: { addr: S.me.addr, name: S.me.name, me: true, online: true, site: S.me.site, exit: S.me.exit, hops: 0, via: null } });
+    T.set(S.me.addr, { x: cx, y: cy, n: { addr: S.me.addr, name: S.me.name, me: true, online: true, site: S.me.site, exit: S.me.exit, tor: !!(S.bridge.tor && S.bridge.tor.state === 'ready'), hops: 0, via: null } });
     const ns = S.nodes.filter((n) => n.online || n.seen < 900e3);
     const direct = ns.filter((n) => n.direct).sort((a, b) => (a.addr < b.addr ? -1 : 1));
     const ang = new Map();
@@ -516,7 +598,7 @@ th{color:var(--muted);font-weight:500}
     for (const n of ns) {
       const ring = n.direct ? 1 : Math.min(Math.max(n.hops, 2), 4);
       const a = ang.get(n.addr);
-      T.set(n.addr, { x: cx + Math.cos(a) * R * ring, y: cy + Math.sin(a) * R * ring * 0.86, n });
+      T.set(n.addr, { x: cx + Math.cos(a) * R * ring, y: cy + Math.sin(a) * R * ring * 0.86, n: { ...n, tor: !!(n.exit && n.exit.tor) } });
     }
     targets = T;
     for (const [a, t] of T) if (!pos.has(a)) pos.set(a, { x: cx + (t.x - cx) * 0.2, y: cy + (t.y - cy) * 0.2 });
@@ -655,6 +737,34 @@ th{color:var(--muted);font-weight:500}
     ctx.textAlign = 'center';
     ctx.fillText('the internet', orb.x, orb.y + 34);
     ctx.textAlign = 'left';
+    // the Tor network: layers of an onion, wired to every node that can reach it
+    const to = torOrb();
+    const torNodes = [...targets.values()].filter((tg) => tg.n.tor && tg.n.online);
+    for (const tg of torNodes) {
+      const p = pos.get(tg.n.addr);
+      ctx.strokeStyle = 'rgba(179,157,219,.6)';
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([2, 6]);
+      ctx.lineDashOffset = -t * 14;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.quadraticCurveTo((p.x + to.x) / 2, Math.max(p.y, to.y) + 24, to.x, to.y);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+    for (let k = 3; k >= 1; k--) {
+      ctx.strokeStyle = `rgba(179,157,219,${(torNodes.length ? 0.95 : 0.3) / k})`;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(to.x, to.y, 5.5 * k + Math.sin(t * 1.4 + k) * 0.6, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.fillStyle = torNodes.length ? '#e4dafc' : 'rgba(143,138,160,.7)';
+    ctx.textAlign = 'center';
+    ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
+    ctx.fillText('Tor', to.x, to.y + 32);
+    ctx.textAlign = 'left';
     // traffic sparks
     particles = particles.filter((pt) => pt.t < 1);
     for (const pt of particles) {
@@ -749,7 +859,7 @@ th{color:var(--muted);font-weight:500}
 
   function renderStats() {
     const online = S.nodes.filter((n) => n.online).length;
-    setHTML($('stats'), `<b>${online}</b> node${online === 1 ? '' : 's'} reachable · <b>${S.links.length}</b> direct link${S.links.length === 1 ? '' : 's'}<br><b>${S.sites.filter((s) => s.online).length}</b> site${S.sites.filter((s) => s.online).length === 1 ? '' : 's'} online · <b>${S.bridge.exits.length + (S.bridge.exit ? 1 : 0)}</b> bridge${S.bridge.exits.length + (S.bridge.exit ? 1 : 0) === 1 ? '' : 's'} to the internet<br>relayed for others: <b>${S.stats.relayed}</b>`);
+    setHTML($('stats'), `<b>${online}</b> node${online === 1 ? '' : 's'} reachable · <b>${S.links.length}</b> direct link${S.links.length === 1 ? '' : 's'}<br><b>${S.sites.filter((s) => s.online).length}</b> site${S.sites.filter((s) => s.online).length === 1 ? '' : 's'} online · <b>${S.bridge.exits.length + (S.bridge.exit ? 1 : 0)}</b> bridge${S.bridge.exits.length + (S.bridge.exit ? 1 : 0) === 1 ? '' : 's'} to the internet<br>Tor: <b>${S.bridge.tor && S.bridge.tor.state === 'ready' ? 'on this node' : S.bridge.exits.some((e) => e.tor) ? 'via the net' : S.bridge.tor ? S.bridge.tor.state : 'off'}</b>${S.bridge.torAll ? ' · <b>all traffic</b>' : ''} · relayed for others: <b>${S.stats.relayed}</b>`);
   }
 
   function renderCard() {

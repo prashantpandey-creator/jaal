@@ -86,7 +86,7 @@ test('no open exit on the public net unless asked for', async (t) => {
   t.after(() => stopAll([a]));
   assert.throws(() => a.bridge.enableExit({}), /refusing to run an open internet exit/);
   a.bridge.enableExit({ open: true });
-  assert.deepEqual(a.node.exit, { ports: [80, 443] });
+  assert.deepEqual(a.node.exit, { ports: [80, 443], tor: false });
 });
 
 test('jaal sites: http://<address>.jaal/ through the proxy, and the public gateway', async (t) => {

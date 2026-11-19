@@ -17,6 +17,8 @@ const { Link } = require('./link');
 const { MeshStream } = require('./stream');
 const { isPrivateIp } = require('./netpolicy');
 
+const isOnion = (h) => /\.onion\.?$/i.test(String(h || ''));
+
 const MAX_HOPS = 16;
 const LAN_PORT = 42424;
 const LAN_GROUP = '239.255.42.99';
@@ -106,6 +108,7 @@ class JaalNode extends EventEmitter {
     this.mirrors = [];
     this.exit = null;
     this.stats = { sent: 0, delivered: 0, relayed: 0 };
+    this.onionDialer = null; // set when this node has Tor: (host, port) => Promise<socket>
     this.stopped = false;
     this.handle('ping', () => ({ pong: true, name: this.opts.name, t: Date.now() }));
   }
@@ -157,6 +160,10 @@ class JaalNode extends EventEmitter {
   // ------------------------------------------------------------------ links
 
   connect(host, port) {
+    if (isOnion(host)) {
+      if (!this.onionDialer) return Promise.reject(new Error('linking to a .onion peer needs Tor on this node (--tor)'));
+      return this.onionDialer(host, port).then((sock) => this._linkOver(sock, { host, port }));
+    }
     return new Promise((resolve, reject) => {
       const sock = net.connect({ host, port });
       const timer = setTimeout(() => {
@@ -169,10 +176,16 @@ class JaalNode extends EventEmitter {
       });
       sock.once('connect', () => {
         clearTimeout(timer);
-        const link = this._attach(sock, true, { host, port });
-        link.once('up', () => resolve(link));
-        link.once('down', (r) => reject(Object.assign(new Error(r), { addr: link.peer?.addr })));
+        this._linkOver(sock, { host, port }).then(resolve, reject);
       });
+    });
+  }
+
+  _linkOver(sock, dialed) {
+    return new Promise((resolve, reject) => {
+      const link = this._attach(sock, true, dialed);
+      link.once('up', () => resolve(link));
+      link.once('down', (r) => reject(Object.assign(new Error(r), { addr: link.peer?.addr })));
     });
   }
 
@@ -250,7 +263,8 @@ class JaalNode extends EventEmitter {
 
   _onLinkUp(link) {
     const p = link.peer;
-    this.log(`link up   ${link.initiator ? '→' : '←'} ${p.name || '?'} ${short(p.addr)}  ${link.remote.host}:${link.remote.port}`);
+    const where = link.dialed ? `${isOnion(link.dialed.host) ? link.dialed.host.slice(0, 6) + '….onion' : link.dialed.host}:${link.dialed.port}` : `${link.remote.host}:${link.remote.port}`;
+    this.log(`link up   ${link.initiator ? '→' : '←'} ${p.name || '?'} ${short(p.addr)}  ${where}`);
     this.announce();
     for (const e of this.nodes.values()) if (!e.broken && e.link !== link) link.send({ t: 'ann', a: e.ann, s: e.sig, h: e.hops });
     if (this.opts.pex) link.send({ t: 'peers', l: this._peerList(link) });
@@ -382,6 +396,7 @@ class JaalNode extends EventEmitter {
       if (!e || typeof e.a !== 'string' || !C.ADDR_RE.test(e.a) || e.a === this.addr || this.byAddr.has(e.a)) continue;
       if (typeof e.h !== 'string' || e.h.length > 255 || !Number.isInteger(e.p) || e.p < 1 || e.p > 65535) continue;
       if (!fromPrivate && net.isIP(e.h) && isPrivateIp(e.h)) continue; // a public peer can't point us into our own LAN
+      if (isOnion(e.h) && !this.onionDialer) continue;
       if (Date.now() - (this.tried.get(e.a) || 0) < 10 * 60_000) continue;
       remember(this.tried, e.a, Date.now(), 5000);
       this.connect(e.h, e.p).catch(() => {});
@@ -508,7 +523,7 @@ class JaalNode extends EventEmitter {
 
   // ------------------------------------------------------------------ streams
 
-  openStream(dst, host, port) {
+  openStream(dst, host, port, extra = {}) {
     const sid = crypto.randomBytes(8).toString('hex');
     const s = new MeshStream(this, dst, sid);
     s.on('error', () => {}); // callers attach their own; this just keeps a stray error from killing the node
@@ -521,7 +536,7 @@ class JaalNode extends EventEmitter {
     s.once('close', () => clearTimeout(timer));
     this.waitRoute(dst).then(
       () => {
-        if (!s.destroyed && !this.sendSealed(dst, { k: 's.open', sid, host, port })) s.destroy(new Error('no route to exit'));
+        if (!s.destroyed && !this.sendSealed(dst, { k: 's.open', sid, host, port, ...extra })) s.destroy(new Error('no route to exit'));
       },
       (e) => s.destroy(e),
     );
@@ -615,7 +630,7 @@ class JaalNode extends EventEmitter {
   exits() {
     const out = [];
     for (const [addr, e] of this.nodes) {
-      if (!e.broken && e.ann.exit && this.routeTo(addr)) out.push({ addr, name: e.ann.name, hops: e.hops, ports: e.ann.exit.ports });
+      if (!e.broken && e.ann.exit && this.routeTo(addr)) out.push({ addr, name: e.ann.name, hops: e.hops, ports: e.ann.exit.ports, tor: e.ann.exit.tor === true });
     }
     return out.sort((a, b) => a.hops - b.hops);
   }
@@ -628,7 +643,7 @@ class JaalNode extends EventEmitter {
         lan: !!this.opts.lan, site: this.site, exit: this.exit, mirrors: this.mirrors,
       },
       links: [...this.links].map((l) => ({
-        addr: l.peer.addr, name: l.peer.name, host: l.remote.host, port: l.remote.port,
+        addr: l.peer.addr, name: l.peer.name, host: l.dialed ? l.dialed.host : l.remote.host, port: l.dialed ? l.dialed.port : l.remote.port,
         out: l.initiator, since: l.since, rx: l.bytesIn, tx: l.bytesOut,
       })),
       nodes: [...this.nodes.values()].map((e) => ({

@@ -11,6 +11,10 @@ const crypto = require('node:crypto');
 
 // Jāla sites may load only from themselves: no trackers, no calls home to the regular internet.
 const SITE_CSP = "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src 'self'; form-action 'self'; base-uri 'self'";
+// The reader: pages fetched through the net (or Tor) shown with NO JavaScript, no cookies, nothing loaded from
+// outside — every link and image is rewritten to come back through the reader.
+const READER_CSP = "default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self'; form-action 'self'; base-uri 'self'";
+const hv = (v) => String(v).replace(/[^\x20-\x7e]/g, (c) => encodeURIComponent(c)); // header-safe (node names can be any script)
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 function send(res, code, type, body, extra = {}) {
@@ -38,10 +42,108 @@ function directory(node, sites, gateway) {
   <ul>${items || '<li class="m">No sites visible yet.</li>'}</ul>`);
 }
 
-function makeContentHandler(node, sites, { gateway = false } = {}) {
+function rewriteHtml(html, pageUrl, prefix) {
+  let base = pageUrl;
+  const b = /<base\b[^>]*\bhref\s*=\s*["']?([^"'\s>]+)/i.exec(html);
+  if (b) {
+    try {
+      base = new URL(b[1].replace(/&amp;/g, '&'), pageUrl).href;
+    } catch { /* keep the page's own URL */ }
+  }
+  const toView = (v) => {
+    const raw = v.trim();
+    if (!raw || raw.startsWith('#') || /^(data|mailto|tel|about|blob):/i.test(raw)) return v;
+    let abs;
+    try {
+      abs = new URL(raw.replace(/&amp;/g, '&'), base);
+    } catch {
+      return '#';
+    }
+    if (abs.protocol !== 'http:' && abs.protocol !== 'https:') return '#'; // javascript:, file:, …
+    return (prefix + abs.href).replace(/&/g, '&amp;').replace(/"/g, '%22').replace(/'/g, '%27');
+  };
+  html = html
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<\/?noscript\b[^>]*>/gi, '')
+    .replace(/<base\b[^>]*>/gi, '')
+    .replace(/\starget\s*=\s*(["'])[\s\S]*?\1/gi, '')
+    .replace(/(<meta\b[^>]*http-equiv\s*=\s*["']?refresh["']?[^>]*content\s*=\s*["']\s*\d+\s*;\s*url\s*=\s*)([^"'>]+)/gi, (m, pre, v) => pre + toView(v))
+    .replace(/(\s(?:href|src|action|poster|formaction|background|data)\s*=\s*)(["'])([\s\S]*?)\2/gi, (m, pre, q, v) => pre + q + toView(v) + q)
+    .replace(/(\s(?:href|src|action|poster|formaction|background)\s*=\s*)([^\s"'>][^\s>]*)/gi, (m, pre, v) => `${pre}"${toView(v)}"`);
+  const tag = `<base href="${toView(base)}">`;
+  return /<head\b[^>]*>/i.test(html) ? html.replace(/<head\b[^>]*>/i, (h) => h + tag) : tag + html;
+}
+
+function readBody(req, max) {
+  return new Promise((resolve, reject) => {
+    const parts = [];
+    let n = 0;
+    req.on('data', (d) => {
+      n += d.length;
+      if (n > max) {
+        reject(new Error('form too large'));
+        req.destroy();
+      } else parts.push(d);
+    });
+    req.on('end', () => resolve(Buffer.concat(parts)));
+    req.on('error', reject);
+  });
+}
+
+async function readerPage(req, res, bridge, prefix, rest) {
+  let target = rest.replace(/^(https?):\/(?!\/)/i, '$1://');
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) target = 'http://' + target;
+  let u;
+  try {
+    u = new URL(target);
+  } catch {
+    return send(res, 400, 'text/html; charset=utf-8', page('Bad address', '<h1>That is not a web address</h1>'));
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return send(res, 400, 'text/html; charset=utf-8', page('Bad address', '<h1>http and https only</h1>'));
+  if (!['GET', 'HEAD', 'POST'].includes(req.method)) return send(res, 405, 'text/plain', 'GET, HEAD or POST\n');
+  let r;
+  try {
+    const body = req.method === 'POST' ? await readBody(req, 1 << 20) : null;
+    r = await bridge.fetchVia(u.href, {
+      method: req.method === 'POST' ? 'POST' : 'GET',
+      body,
+      headers: body ? { 'content-type': String(req.headers['content-type'] || 'application/x-www-form-urlencoded'), 'content-length': String(body.length) } : {},
+    });
+  } catch (e) {
+    return send(res, 502, 'text/html; charset=utf-8', page('Unreachable', `<h1>Couldn't reach it</h1><p>${esc(e.message)}</p><p class="m"><code>${esc(u.href)}</code></p>`), { 'content-security-policy': READER_CSP });
+  }
+  const via = r.via.tor ? (r.via.self ? 'Tor on this node' : `Tor via ${r.via.name}`) : r.via.self ? 'straight out of this node' : `exit ${r.via.name}`;
+  if (r.status >= 300 && r.status < 400 && r.headers.location) {
+    let loc = null;
+    try {
+      loc = new URL(r.headers.location, u.href).href;
+    } catch { /* unusable redirect */ }
+    if (loc && /^https?:/i.test(loc)) {
+      res.writeHead(302, { location: prefix + loc, 'x-jaal-via': hv(via) });
+      return res.end();
+    }
+  }
+  const type = String(r.headers['content-type'] || 'application/octet-stream');
+  let out = r.body;
+  if (/^(text\/html|application\/xhtml)/i.test(type)) out = Buffer.from(rewriteHtml(out.toString('latin1'), u.href, prefix), 'latin1');
+  res.writeHead(r.status, {
+    'content-type': hv(type), 'content-length': out.length, 'content-security-policy': READER_CSP,
+    'x-content-type-options': 'nosniff', 'referrer-policy': 'same-origin', 'cache-control': 'no-store', 'x-jaal-via': hv(via),
+  });
+  res.end(req.method === 'HEAD' ? undefined : out);
+}
+
+function makeContentHandler(node, sites, { gateway = false, reader = null, readerToken = null } = {}) {
+  const prefix = readerToken ? `/view/${readerToken}/` : null;
   return async function handle(req, res, forced) {
-    if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'text/plain', 'read-only\n');
     const u = new URL(req.url, 'http://jaal.invalid');
+    if (!forced && u.pathname.startsWith('/view/')) {
+      // Only the local site server has a reader, and only with this run's secret in the path: a web page
+      // you visit elsewhere can't make your node fetch things through Tor or an exit.
+      if (!reader || !prefix || !req.url.startsWith(prefix)) return send(res, 404, 'text/plain', 'not found\n');
+      return readerPage(req, res, reader, prefix, req.url.slice(prefix.length));
+    }
+    if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'text/plain', 'read-only\n');
     let addr;
     let rest;
     let rootMode = false;
@@ -59,7 +161,12 @@ function makeContentHandler(node, sites, { gateway = false } = {}) {
       } else {
         const m = /^\/([a-z2-7]{32})(\/.*)?$/.exec(u.pathname);
         if (!m) {
-          // a site used a root-relative link ("/about.html"): put it back under the site it came from
+          // a page used a root-relative link ("/about.html"): put it back under the page it came from
+          const vref = prefix && new RegExp(`^https?://[^/]+${prefix}(https?://[^/]+)`).exec(String(req.headers.referer || ''));
+          if (vref && u.pathname !== '/') {
+            res.writeHead(302, { location: prefix + vref[1] + u.pathname + u.search });
+            return res.end();
+          }
           const ref = /^https?:\/\/[^/]+\/([a-z2-7]{32})\//.exec(String(req.headers.referer || ''));
           if (ref && u.pathname !== '/') {
             res.writeHead(302, { location: `/${ref[1]}${u.pathname}${u.search}` });
@@ -91,7 +198,7 @@ function makeContentHandler(node, sites, { gateway = false } = {}) {
         'referrer-policy': 'same-origin',
         'cache-control': 'no-cache',
         'x-jaal-site': addr,
-        'x-jaal-source': f.source,
+        'x-jaal-source': hv(f.source),
       });
       res.end(req.method === 'HEAD' ? undefined : f.buf);
     } catch (e) {
@@ -154,6 +261,10 @@ function makeApi(node, sites, msgs, bridge) {
         return { ok: true };
       case 'POST webcheck':
         return bridge.webcheck(String(body.url || 'https://example.com/'));
+      case 'POST tor':
+        return bridge.setTorAll(!!body.all);
+      case 'POST torcheck':
+        return bridge.torcheck();
       case 'POST ping': {
         const t0 = Date.now();
         const r = await node.request(String(body.addr || ''), 'ping', {}, 8000);
@@ -167,8 +278,9 @@ function makeApi(node, sites, msgs, bridge) {
 
 async function startPortal(node, sites, msgs, bridge, { port = 7777, contentPort, host = '127.0.0.1' } = {}) {
   const token = crypto.randomBytes(18).toString('base64url');
+  const readerToken = crypto.randomBytes(12).toString('hex');
   const html = fs.readFileSync(path.join(__dirname, 'portal.html'), 'utf8');
-  const content = makeContentHandler(node, sites);
+  const content = makeContentHandler(node, sites, { reader: bridge, readerToken });
   const contentServer = http.createServer((req, res) => {
     const h = String(req.headers.host || '').toLowerCase();
     if (!/^(?:127\.0\.0\.1|localhost|\[::1\]|[a-z2-7]{32}\.localhost)(?::\d+)?$/.test(h)) return send(res, 403, 'text/plain', 'forbidden host\n');
@@ -183,7 +295,7 @@ async function startPortal(node, sites, msgs, bridge, { port = 7777, contentPort
     if (u.pathname === '/' && req.method === 'GET') {
       const nonce = crypto.randomBytes(16).toString('base64');
       const contentBase = `http://127.0.0.1:${cport}`;
-      const body = html.replaceAll('__TOKEN__', token).replaceAll('__NONCE__', nonce).replaceAll('__CONTENT__', contentBase);
+      const body = html.replaceAll('__TOKEN__', token).replaceAll('__NONCE__', nonce).replaceAll('__CONTENT__', contentBase).replaceAll('__READER__', `${contentBase}/view/${readerToken}/`);
       return send(res, 200, 'text/html; charset=utf-8', body, {
         'cache-control': 'no-store',
         'referrer-policy': 'no-referrer',
@@ -206,7 +318,7 @@ async function startPortal(node, sites, msgs, bridge, { port = 7777, contentPort
     send(res, 404, 'text/plain', 'not found\n');
   });
   const uiPort = await listen(portal, port, host);
-  const info = { ui: uiPort, content: cport, token };
+  const info = { ui: uiPort, content: cport, token, reader: `/view/${readerToken}/` };
   fs.writeFileSync(path.join(node.dataDir, 'ui.json'), JSON.stringify(info), { mode: 0o600 });
   return { portal, contentServer, ...info };
 }
@@ -219,4 +331,4 @@ async function startGateway(node, sites, bridge, { port = 8080, host = '0.0.0.0'
   return { server, port: p };
 }
 
-module.exports = { makeContentHandler, startPortal, startGateway, esc };
+module.exports = { makeContentHandler, startPortal, startGateway, esc, rewriteHtml, READER_CSP };
