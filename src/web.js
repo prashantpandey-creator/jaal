@@ -67,6 +67,8 @@ function rewriteHtml(html, pageUrl, prefix) {
     .replace(/<\/?noscript\b[^>]*>/gi, '')
     .replace(/<base\b[^>]*>/gi, '')
     .replace(/\starget\s*=\s*(["'])[\s\S]*?\1/gi, '')
+    // browsers prefer srcset over src and the reader rewrites src, so srcset goes: images load through the reader
+    .replace(/\s(?:image)?srcset\s*=\s*(?:(["'])[\s\S]*?\1|[^\s>]+)/gi, '')
     .replace(/(<meta\b[^>]*http-equiv\s*=\s*["']?refresh["']?[^>]*content\s*=\s*["']\s*\d+\s*;\s*url\s*=\s*)([^"'>]+)/gi, (m, pre, v) => pre + toView(v))
     .replace(/(\s(?:href|src|action|poster|formaction|background|data)\s*=\s*)(["'])([\s\S]*?)\2/gi, (m, pre, q, v) => pre + q + toView(v) + q)
     .replace(/(\s(?:href|src|action|poster|formaction|background)\s*=\s*)([^\s"'>][^\s>]*)/gi, (m, pre, v) => `${pre}"${toView(v)}"`);

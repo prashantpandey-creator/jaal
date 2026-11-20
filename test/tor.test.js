@@ -161,7 +161,9 @@ test('link to a peer by its .onion address (and not without Tor)', async (t) => 
 test('reader: no JavaScript, no cookies, links come back through it — and only with the secret, never on the gateway', async (t) => {
   const html = '<html><head><title>Hidden wiki</title><script>alert(1)</script></head><body>'
     + '<a href="/about">about</a> <a href="http://other.onion/x" target="_blank">x</a> <a href="javascript:steal()">j</a>'
-    + '<img src="logo.png"><form action="/search"><input name=q></form><noscript><p>no js here</p></noscript></body></html>';
+    + '<img src="logo.png" srcset="logo-2x.png 2x, http://cdn.onion/big.png 800w" loading="lazy">'
+    + '<picture><source srcset=http://cdn.onion/a.webp type="image/webp"><img src="pic.png"></picture>'
+    + '<form action="/search"><input name=q></form><noscript><p>no js here</p></noscript></body></html>';
   const site = await listen(http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'set-cookie': 'track=1' });
     res.end(req.url === '/' ? html : 'ok');
@@ -191,6 +193,8 @@ test('reader: no JavaScript, no cookies, links come back through it — and only
   assert.ok(r.body.includes(`href="${pre}/about"`), 'root-relative link');
   assert.ok(r.body.includes('href="/view/secret123/http://other.onion/x"'), 'absolute link');
   assert.ok(r.body.includes(`src="${pre}/logo.png"`), 'relative image');
+  assert.ok(r.body.includes(`src="${pre}/pic.png"`), 'image inside <picture>');
+  assert.ok(!/srcset/i.test(r.body), 'srcset dropped: browsers prefer it over src, and the reader rewrites src');
   assert.ok(r.body.includes(`action="${pre}/search"`), 'form');
   assert.ok(!/target=/i.test(r.body) && !/javascript:/i.test(r.body));
   const before = ftor.seen.length;
