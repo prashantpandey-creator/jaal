@@ -3,9 +3,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const net = require('node:net');
 const http = require('node:http');
-const { makeNode, chain, stopAll, waitFor, get } = require('./helpers');
+const fs = require('node:fs');
+const path = require('node:path');
+const { makeNode, chain, stopAll, waitFor, get, tmp } = require('./helpers');
 const { Tor, socks5 } = require('../src/tor');
-const { makeContentHandler, startGateway } = require('../src/web');
+const { makeContentHandler, startGateway, startPortal } = require('../src/web');
 
 const listen = (server) => new Promise((r) => server.listen(0, '127.0.0.1', () => r(server)));
 const webServer = (text) => listen(http.createServer((req, res) => {
@@ -203,4 +205,180 @@ test('reader: no JavaScript, no cookies, links come back through it — and only
   const viaGateway = await get({ port: gw.port, path: `${pre}/` });
   assert.equal(viaGateway.status, 404, 'the public gateway is never a reader');
   assert.equal(ftor.seen.length, before, 'neither request reached Tor');
+});
+
+// ---------------------------------------------------------------- the portal's Tor control: no flag, no restart
+
+// The portal's API the way the page calls it: the token header, and the Host check on the server.
+function api(ui, route, body) {
+  return new Promise((resolve, reject) => {
+    const data = body ? JSON.stringify(body) : '';
+    const req = http.request({
+      host: '127.0.0.1', port: ui.ui, method: body ? 'POST' : 'GET', path: `/api/${route}`,
+      headers: { 'x-jaal-token': ui.token, 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) },
+    }, (res) => {
+      let s = '';
+      res.on('data', (d) => (s += d));
+      res.on('end', () => (res.statusCode === 200 ? resolve(JSON.parse(s)) : reject(new Error(`${res.statusCode} ${s}`))));
+    });
+    req.on('error', reject);
+    req.end(data);
+  });
+}
+
+// A stand-in for the tor binary: prints Tor's bootstrap lines, listens on the --SocksPort it is given, and
+// exits when the node that started it is gone (as Tor does with --__OwningControllerProcess).
+function fakeTorBinary() {
+  const file = path.join(tmp('tor-bin'), 'tor');
+  fs.writeFileSync(file, `#!${process.execPath}
+'use strict';
+const net = require('node:net');
+const arg = (k) => { const i = process.argv.indexOf(k); return i > 1 ? process.argv[i + 1] : ''; };
+const port = Number(/127\\.0\\.0\\.1:(\\d+)/.exec(arg('--SocksPort'))[1]);
+const owner = Number(arg('--__OwningControllerProcess'));
+const server = net.createServer((c) => { c.on('error', () => {}); c.once('data', () => c.end(Buffer.from([5, 0]))); });
+server.listen(port, '127.0.0.1', () => {
+  console.log('Mar 01 00:00:00.000 [notice] Bootstrapped 0% (starting): Starting');
+  setTimeout(() => console.log('Mar 01 00:00:00.000 [notice] Bootstrapped 100% (done): Done'), 60);
+});
+setInterval(() => { try { process.kill(owner, 0); } catch { server.close(); process.exit(0); } }, 100).unref();
+process.on('SIGTERM', () => { server.close(); process.exit(0); });
+`, { mode: 0o755 });
+  return file;
+}
+
+const closePortal = async (ui, ns) => {
+  ui.portal.close();
+  ui.contentServer.close();
+  await stopAll(ns);
+};
+
+test('the portal turns Tor on for the running node — no flag, no restart — and off again', async (t) => {
+  const n = await makeNode('p', { bridge: { torPath: fakeTorBinary(), torPorts: [] } });
+  const ui = await startPortal(n.node, n.sites, n.msgs, n.bridge, { port: 0 });
+  t.after(async () => {
+    n.bridge.stopTor();
+    await closePortal(ui, [n]);
+  });
+  assert.equal((await api(ui, 'status')).bridge.tor, null, 'Tor stays off until the owner turns it on');
+  assert.ok(['starting', 'ready'].includes((await api(ui, 'tor', { on: true })).state));
+  await waitFor(async () => (await api(ui, 'status')).bridge.tor?.state === 'ready', 10_000, 'Tor to reach ready');
+  const { bridge } = await api(ui, 'status');
+  assert.equal(bridge.tor.progress, 100);
+  assert.equal(bridge.tor.source, 'jaal', 'its own tor binary, not a Tor already running');
+  assert.equal(bridge.tor.onion, null, 'Tor on does not publish this node as an onion service');
+  assert.equal(n.node.exit, null, 'Tor on does not make this node an exit');
+  assert.equal(n.bridge.policy, null);
+  const proc = n.bridge.tor.proc;
+  assert.deepEqual(await api(ui, 'tor', { on: false }), { state: 'off', torAll: false });
+  assert.equal(n.bridge.tor, null);
+  await waitFor(() => proc.exitCode !== null || proc.signalCode !== null, 5000, 'our tor process to stop');
+});
+
+test('turning Tor on or off never changes Tor-only mode, and Tor-only mode stays fail-closed', async (t) => {
+  const n = await makeNode('o', { bridge: { torPath: fakeTorBinary(), torPorts: [] } });
+  const ui = await startPortal(n.node, n.sites, n.msgs, n.bridge, { port: 0 });
+  t.after(async () => {
+    n.bridge.stopTor();
+    await closePortal(ui, [n]);
+  });
+  await api(ui, 'tor', { all: true });
+  await api(ui, 'tor', { on: true });
+  await waitFor(async () => (await api(ui, 'status')).bridge.tor?.state === 'ready', 10_000, 'Tor to reach ready');
+  await api(ui, 'tor', { on: false });
+  assert.equal((await api(ui, 'status')).bridge.torAll, true, 'Tor-only mode survives Tor going off');
+  await assert.rejects(n.bridge.dial('example.com', 80), /nothing was sent/, 'and with Tor off nothing is sent');
+  await api(ui, 'tor', { all: false });
+  assert.equal((await api(ui, 'status')).bridge.torAll, false);
+});
+
+test('no Tor installed: the portal says so and gives the install lines', async (t) => {
+  const n = await makeNode('m', { bridge: { torPath: '/nonexistent/tor', torPorts: [] } });
+  const ui = await startPortal(n.node, n.sites, n.msgs, n.bridge, { port: 0 });
+  t.after(() => closePortal(ui, [n]));
+  assert.equal((await api(ui, 'status')).bridge.torInstalled, false);
+  const r = await api(ui, 'tor', { on: true });
+  assert.equal(r.state, 'missing');
+  assert.match(r.error, /macOS: brew install tor/);
+  assert.match(r.error, /Debian\/Ubuntu: sudo apt install tor/);
+  assert.equal((await api(ui, 'status')).bridge.tor.state, 'missing');
+});
+
+test('an exit does not open .onion sites for others because its owner turned Tor on for themselves', async (t) => {
+  const site = await webServer('should not be reached');
+  const onion = onionOf('f');
+  const ftor = await fakeTor({ [onion]: site.address().port });
+  const ns = await chain(['a', 'x'], { netKey: 'om' });
+  const [a, x] = ns;
+  x.bridge.enableExit({ ports: [80, 443] });
+  const own = new Tor(x.node, { socks: `127.0.0.1:${ftor.port}` });
+  x.bridge.useTor(own, { forPeers: false });
+  await own.start();
+  assert.equal(own.state, 'ready');
+  await waitFor(() => a.node.exits().length === 1, 3000, 'exit in announcement');
+  assert.equal(a.node.exits()[0].tor, false, 'the exit is not announced as opening onion sites');
+  await a.bridge.startProxy({ port: 0 });
+  t.after(async () => {
+    a.bridge.proxy.close();
+    await stopAll(ns);
+    site.closeAllConnections();
+    site.close();
+    ftor.server.close();
+  });
+  const r = await get({ port: a.bridge.proxyPort, path: `http://${onion}/`, headers: { host: onion } });
+  assert.equal(r.status, 502);
+  assert.match(r.body, /no Tor on this node or the net/);
+  await x.bridge._exitStream(a.addr, { sid: 1, host: onion, port: 80, tor: true });
+  assert.equal(x.bridge.exitLog.length, 0, 'the exit carried nothing for others');
+  assert.equal(ftor.seen.filter((s) => s.name === onion).length, 0, 'Tor was never asked for the onion');
+});
+
+test("a failed site shows the reader's reason, never a blank page", async (t) => {
+  const empty = await listen(http.createServer((req, res) => {
+    res.writeHead(503);
+    res.end();
+  }));
+  const onionEmpty = onionOf('g');
+  const onionGone = onionOf('h');
+  const ftor = await fakeTor({ [onionEmpty]: empty.address().port });
+  const a = await makeNode('r');
+  await torFor(a, ftor);
+  const bare = await makeNode('bare');
+  const srv = await listen(http.createServer(makeContentHandler(a.node, a.sites, { reader: a.bridge, readerToken: 'tok' })));
+  const srvBare = await listen(http.createServer(makeContentHandler(bare.node, bare.sites, { reader: bare.bridge, readerToken: 'tok' })));
+  t.after(async () => {
+    srv.close();
+    srvBare.close();
+    empty.close();
+    ftor.server.close();
+    await stopAll([a, bare]);
+  });
+  const e = await get({ port: srv.address().port, path: `/view/tok/http://${onionEmpty}/` });
+  assert.equal(e.status, 503);
+  assert.match(e.body, /The site sent no page/);
+  assert.match(e.body, /503 Service Unavailable/);
+  const gone = await get({ port: srv.address().port, path: `/view/tok/http://${onionGone}/` });
+  assert.equal(gone.status, 502);
+  assert.match(gone.body, /onion site not found/);
+  const off = await get({ port: srvBare.address().port, path: `/view/tok/http://${onionEmpty}/` });
+  assert.equal(off.status, 502);
+  assert.match(off.body, /turn Tor on/);
+});
+
+test('the portal Tor card lists the five checked .onion sites; the Tor Project address is written once', async (t) => {
+  const n = await makeNode('l');
+  const ui = await startPortal(n.node, n.sites, n.msgs, n.bridge, { port: 0 });
+  t.after(() => closePortal(ui, [n]));
+  const html = (await get({ port: ui.ui, path: '/' })).body;
+  const torProject = '2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion';
+  for (const where of [
+    torProject,
+    'bbcnewsd73hkzno2ini43t4gblxvycyac5aw4gnv7t2rccijh7745uqd.onion/',
+    'duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion/html/',
+    'sdolvtfhatvsysc6l34d65ymdwxcujausv7k5jk4cy5ttzhjoi6fzvyd.onion/directory/',
+    'vww6ybal4bd7szmgncyruucpgfkqahzddi37ktceo3ah7ngmcopnpyyd.onion/index.en.html',
+  ]) assert.ok(html.includes(where), `listed: ${where}`);
+  assert.equal(html.split(torProject).length - 1, 1, 'the Tor Project address is defined once and reused');
+  assert.ok(html.includes('works without JavaScript'), 'each entry says it works without JavaScript');
+  assert.ok(html.includes('id="torSites"') && html.includes('data-act="tortoggle"'));
 });

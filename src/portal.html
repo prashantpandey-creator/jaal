@@ -138,9 +138,13 @@ th{color:var(--muted);font-weight:500}
       <div class="item" id="torCard">
         <div class="row" style="justify-content:space-between"><div class="t">Tor · .onion sites</div><span class="tag violet" id="torTag">off</span></div>
         <div id="torInfo" class="muted" style="font-size:12.5px;margin:4px 0 10px"></div>
-        <label class="row" style="font-size:13px;margin-bottom:10px;cursor:pointer"><input type="checkbox" id="torAll"> Send all internet traffic through Tor — if Tor isn't reachable, nothing is sent</label>
-        <div class="row"><button class="btn violet" type="button" data-act="torcheck">Check Tor</button><button class="btn ghost" type="button" data-act="toronion">Open the Tor Project's onion</button></div>
-        <div id="torOut" style="margin-top:10px"></div>
+        <div class="row" style="margin-bottom:12px"><button class="btn" type="button" id="torToggle" data-act="tortoggle" data-on="0">Turn Tor on</button><button class="btn violet small" type="button" data-act="torcheck">Check Tor</button></div>
+        <label class="row" id="torAllRow" style="font-size:13px;margin-bottom:4px;cursor:pointer"><input type="checkbox" id="torAll"> Send all internet traffic through Tor — if Tor isn't reachable, nothing is sent</label>
+        <div id="torAllHint" class="muted" style="font-size:12px;margin:0 0 10px"></div>
+        <div id="torOut" style="margin-bottom:10px"></div>
+        <div class="t" style="font-size:13px;margin:4px 0 2px">Tor sites</div>
+        <p class="muted" style="font-size:12px;margin:0 0 8px">Each one opens in the reader: no JavaScript, no cookies. Tor must be on.</p>
+        <div id="torSites"></div>
         <p class="muted" style="font-size:12px;margin:10px 0 0">The reader shows pages with no JavaScript and keeps no cookies. Through your browser's proxy .onion sites open too, but that is not Tor Browser: for anonymity from the sites themselves, use Tor Browser.</p>
       </div>
       <h2>Exits — nodes sharing their internet</h2>
@@ -175,6 +179,14 @@ th{color:var(--muted);font-weight:500}
   const CONTENT = '__CONTENT__';
   const READER = '__READER__';
   const TORPROJECT_ONION = 'http://2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion/'; // from torproject.org's own Onion-Location header
+  // The Tor sites the card offers. Only these: each was checked on 2026-11-21 by its HTTP status and page title.
+  const TOR_SITES = [
+    { name: 'Tor Project', url: TORPROJECT_ONION, about: "the Tor Project's own site" },
+    { name: 'BBC News', url: 'http://bbcnewsd73hkzno2ini43t4gblxvycyac5aw4gnv7t2rccijh7745uqd.onion/', about: 'BBC News home page' },
+    { name: 'DuckDuckGo', url: 'http://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion/html/', about: 'search, the HTML version' },
+    { name: 'SecureDrop directory', url: 'http://sdolvtfhatvsysc6l34d65ymdwxcujausv7k5jk4cy5ttzhjoi6fzvyd.onion/directory/', about: 'news sites that take anonymous tips' },
+    { name: 'Riseup', url: 'http://vww6ybal4bd7szmgncyruucpgfkqahzddi37ktceo3ah7ngmcopnpyyd.onion/index.en.html', about: "Riseup's own site" },
+  ];
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const short = (a) => (a ? a.slice(0, 6) + '…' + a.slice(-4) : '');
@@ -309,7 +321,8 @@ th{color:var(--muted);font-weight:500}
     if (onion || b.torAll) {
       if (b.tor && b.tor.state === 'ready') return 'through Tor on this node';
       if (torExit) return `through Tor on ${torExit.name}, ${hops(torExit.hops)}`;
-      return b.tor && b.tor.state === 'starting' ? `Tor is starting (${b.tor.progress}%)…` : 'no Tor reachable — start a node with --tor';
+      if (b.tor && b.tor.state === 'starting') return `Tor is starting (${b.tor.progress}%)…`;
+      return b.torInstalled ? 'Tor is off here — turn it on under Internet' : 'Tor is not installed here — see Internet';
     }
     if (b.exit) return 'straight out of this node';
     return b.exits[0] ? `through ${b.exits[0].name}, ${hops(b.exits[0].hops)}` : 'no internet exit on the net yet';
@@ -410,17 +423,41 @@ th{color:var(--muted);font-weight:500}
     setHTML($('proxyInfo'), b.proxy
       ? `Set <code>${b.proxy.host}:${b.proxy.port}</code> as the HTTP and HTTPS proxy (browser or system settings). Everything then travels the net; <code>http://&lt;address&gt;.jaal/</code> opens Jāla sites directly.<pre class="code">curl -x http://${b.proxy.host}:${b.proxy.port} https://example.com</pre>`
       : 'The local proxy is off — start with <code>--proxy 8118</code>.');
+    // The Tor card: one control turns Tor on or off for this node, and the states are plain words.
     const tor = b.tor;
     const torExits = ex.filter((x) => x.tor);
-    setHTML($('torTag'), !tor ? (torExits.length ? 'via the net' : 'off') : tor.state === 'ready' ? 'ready' : tor.state === 'starting' ? `starting ${tor.progress}%` : tor.state === 'missing' ? 'not installed' : tor.state);
     const viaNet = torExits.length ? ` ${esc(torExits[0].name)} (${hops(torExits[0].hops)}) opens .onion sites for the net.` : '';
-    setHTML($('torInfo'), tor && tor.state === 'ready'
-      ? `This node runs Tor (${tor.source === 'jaal' ? 'its own, stopped with the node' : 'the Tor already running on this machine'}).${tor.onion ? ` It is also an onion service — peers anywhere can link to <code>${esc(tor.onion)}:4747</code>, no public IP needed.` : ''}`
-      : tor && tor.state === 'starting' ? `Tor is starting… ${tor.progress}%.${viaNet}`
-        : tor && tor.state === 'missing' ? `Tor isn't installed on this machine (<code>brew install tor</code>).${viaNet}`
-          : tor && tor.error ? `Tor: ${esc(tor.error)}.${viaNet}`
-            : torExits.length ? `No Tor on this node, but${viaNet}` : 'Start this node with <code>--tor</code>, or an exit with <code>--exit --tor</code>, to open .onion sites.');
-    if (document.activeElement !== $('torAll')) $('torAll').checked = !!b.torAll;
+    const running = !!tor && (tor.state === 'starting' || tor.state === 'ready');
+    let tag = 'off';
+    let info = 'Tor is off. Turn it on to open .onion sites from this node; your other traffic is unchanged.';
+    if (tor && tor.state === 'ready') {
+      tag = 'ready';
+      info = `Tor is on: ${tor.source === 'jaal' ? 'this node runs its own, which stops when you turn it off or the node stops' : 'the Tor already running on this machine'}. .onion sites open in the reader below.${tor.onion ? ` This node is also an onion service: peers anywhere can link to <code>${esc(tor.onion)}:4747</code>.` : ''}`;
+    } else if (tor && tor.state === 'starting') {
+      tag = `starting ${tor.progress}%`;
+      info = `Tor is starting… ${tor.progress}%. .onion sites open when it reaches 100%.${viaNet}`;
+    } else if (torExits.length) {
+      tag = 'via the net';
+      info = `Tor is off on this node, but${viaNet}`;
+    } else if (!b.torInstalled) {
+      tag = 'not installed';
+      info = 'Tor isn\'t installed on this machine. Install it, then press <b>Turn Tor on</b>: macOS <code>brew install tor</code> · Debian/Ubuntu <code>sudo apt install tor</code>.';
+    } else if (tor && tor.state === 'error') {
+      tag = 'error';
+      info = `Tor stopped: ${esc(tor.error || 'unknown error')}. Press <b>Turn Tor on</b> to try again.`;
+    }
+    setHTML($('torTag'), tag);
+    setHTML($('torInfo'), info);
+    const toggle = $('torToggle');
+    toggle.dataset.on = running ? '1' : '0';
+    setHTML(toggle, running ? 'Turn Tor off' : 'Turn Tor on');
+    // Tor-only mode can be switched on only while Tor is ready, but it can always be switched off
+    const ready = !!tor && tor.state === 'ready';
+    const all = $('torAll');
+    if (document.activeElement !== all) all.checked = !!b.torAll;
+    all.disabled = !ready && !b.torAll;
+    $('torAllRow').style.opacity = all.disabled ? '.55' : '';
+    setHTML($('torAllHint'), ready ? '' : b.torAll ? 'Tor-only mode is on and Tor is not ready, so all internet traffic is blocked until it is.' : 'Turn Tor on first: this mode needs Tor.');
     setHTML($('exitList'), ex.length ? ex.map((x) => `<div class="item"><div class="row" style="justify-content:space-between"><div class="t">${esc(x.name)}</div><span>${x.tor ? '<span class="tag violet">Tor</span>' : ''}<span class="tag sky">ports ${x.ports.join(', ')}</span></span></div><div class="muted" style="font-size:12px">${hops(x.hops)} away · <span class="addr">${short(x.addr)}</span>${S.bridge.via === x.addr ? ' · pinned with --via' : ''}</div></div>`).join('')
       : '<p class="muted">None visible.</p>');
     setHTML($('exitMine'), b.exit && b.exit.recent.length
@@ -446,6 +483,21 @@ th{color:var(--muted);font-weight:500}
       toast(err.message, true);
     }
   });
+  async function toggleTor(turnOn) {
+    const btn = $('torToggle');
+    btn.disabled = true;
+    try {
+      const r = await api('tor', { on: turnOn });
+      const bad = r.state === 'missing' || r.state === 'error';
+      toast(!turnOn ? 'Tor is off on this node' : bad ? r.error : r.state === 'ready' ? 'Tor is on' : 'Tor is starting…', bad);
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      btn.disabled = false;
+      tick();
+    }
+  }
+  $('torSites').innerHTML = TOR_SITES.map((s) => `<div class="row" style="justify-content:space-between;margin:0 0 8px"><button class="btn ghost small" type="button" data-act="torsite" data-url="${esc(s.url)}">${esc(s.name)}</button><span class="muted" style="font-size:12px">${esc(s.about)} · works without JavaScript</span></div>`).join('');
   async function runTorCheck() {
     const out = $('torOut');
     out.innerHTML = '<span class="muted">asking check.torproject.org through Tor…</span>';
@@ -527,8 +579,10 @@ th{color:var(--muted);font-weight:500}
         tick();
       } else if (act === 'torcheck') {
         runTorCheck();
-      } else if (act === 'toronion') {
-        openReader(TORPROJECT_ONION);
+      } else if (act === 'tortoggle') {
+        toggleTor(el.dataset.on !== '1');
+      } else if (act === 'torsite') {
+        openReader(el.dataset.url);
       } else if (act === 'unselect') {
         sel = null;
         renderCard();

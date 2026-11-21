@@ -29,6 +29,7 @@ const HELP = `
     --gateway <port>             public, read-only web gateway to Jāla sites (off by default)
     --tor                        use Tor: .onion sites open, and .onion peers link. Uses a Tor already running
                                  (port 9050/9150), or starts its own that stops with the node.
+                                 Or turn Tor on in the portal (Internet tab) with no flag at all.
     --tor-all                    send ALL internet traffic through Tor (fails closed: no Tor, nothing sent)
     --onion                      run Tor and make this node an onion service: reachable from anywhere as
                                  <name>.onion:4747, no public IP or open port needed
@@ -87,7 +88,7 @@ async function start(o) {
   });
   const sites = new Sites(node);
   const msgs = new Messages(node);
-  const bridge = new Bridge(node, sites, { via: o.via || null, torAll: !!o['tor-all'] });
+  const bridge = new Bridge(node, sites, { via: o.via || null, torAll: !!o['tor-all'], torPath: o['tor-path'] && o['tor-path'] !== true ? String(o['tor-path']) : undefined });
   const wantTor = o.tor || o.onion || o['tor-all'] || o['tor-socks'];
   const tor = wantTor ? new Tor(node, { socks: o['tor-socks'] && o['tor-socks'] !== true ? String(o['tor-socks']) : null, onion: !!o.onion, torPath: o['tor-path'] }) : null;
   if (tor) bridge.useTor(tor);
@@ -136,7 +137,7 @@ async function start(o) {
   const bye = async () => {
     if (stopping) process.exit(0);
     stopping = true;
-    if (tor) tor.stop();
+    if (bridge.tor) bridge.tor.stop(); // a Tor started from the portal included
     await node.stop();
     process.exit(0);
   };

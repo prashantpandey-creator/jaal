@@ -161,7 +161,7 @@ class JaalNode extends EventEmitter {
 
   connect(host, port) {
     if (isOnion(host)) {
-      if (!this.onionDialer) return Promise.reject(new Error('linking to a .onion peer needs Tor on this node (--tor)'));
+      if (!this.onionDialer) return Promise.reject(new Error('linking to a .onion peer needs Tor on this node (turn it on under Internet, or start with --tor)'));
       return this.onionDialer(host, port).then((sock) => this._linkOver(sock, { host, port }));
     }
     return new Promise((resolve, reject) => {

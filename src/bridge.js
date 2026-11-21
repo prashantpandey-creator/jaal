@@ -5,6 +5,7 @@
 //             Off by default. Refuses to run open on the public net unless you say --exit-open.
 //             Never dials private / local addresses (see netpolicy.js). With Tor on the exit
 //             (--exit --tor) it also opens .onion sites, and any stream that asks for Tor.
+//             A Tor turned on from the portal is for this node only: the exit never opens .onion sites with it.
 //   proxy     a local HTTP + HTTPS (CONNECT) proxy. Point any browser or app at it and
 //               - normal sites go through the nearest exit, across the mesh
 //               - .onion sites go through Tor (this node's, or a Jāla exit's)
@@ -18,7 +19,7 @@ const tls = require('node:tls');
 const zlib = require('node:zlib');
 const { dialOut } = require('./netpolicy');
 const { makeContentHandler } = require('./web');
-const { isOnion, maskOnion } = require('./tor');
+const { Tor, isOnion, maskOnion, findTor } = require('./tor');
 
 const HOP = ['connection', 'proxy-connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade'];
 const strip = (h) => {
@@ -76,25 +77,58 @@ class Bridge {
     this.opts = { via: null, torAll: false, ...opts };
     this.policy = null;
     this.tor = null;
+    this.torForPeers = false;
     this.proxyPort = null;
     this.proxyHost = null;
     this.gatewayPort = null;
     this.exitLog = [];
     this.content = makeContentHandler(node, sites);
+    // the exit's announcement follows its Tor: .onion sites open for others only if that Tor was started with the node
+    this.node.on('tor-ready', (t) => {
+      if (t !== this.tor || !this.policy) return;
+      this.node.exit = { ports: this.policy.ports, tor: this.torForPeers };
+      this.node.announce();
+    });
   }
 
   // ------------------------------------------------------------------ Tor on this node
 
-  useTor(tor) {
+  // forPeers: may an exit on this node open .onion sites for the rest of the net? Flags at start-up say yes
+  // (--exit --tor). A Tor turned on from the portal says no: it is for this node's own traffic.
+  useTor(tor, { forPeers = true } = {}) {
     this.tor = tor;
+    this.torForPeers = !!forPeers;
     this.node.onionDialer = (host, port) => tor.connect(host, port);
-    this.node.on('tor-ready', () => {
-      if (this.policy) {
-        this.node.exit = { ports: this.policy.ports, tor: true };
-        this.node.announce(); // tell the net: this exit opens .onion sites now
-      }
-    });
     return this;
+  }
+
+  // The portal's switch: start a Tor for this node now, with no flag and no restart. It never publishes the node as
+  // an onion service and never makes it an exit or a relay for others. Returns the Tor's state at once; the
+  // bootstrap goes on in the background and the portal polls it. opts.torPath picks the tor binary; opts.torPorts is
+  // the SOCKS ports to look for a Tor already running first (default 9050, 9150).
+  async startTor() {
+    if (this.tor && ['starting', 'ready'].includes(this.tor.state)) return this.tor.info();
+    const tor = new Tor(this.node, { torPath: this.opts.torPath, probePorts: this.opts.torPorts });
+    this.useTor(tor, { forPeers: false });
+    try {
+      await tor.start();
+    } catch (e) {
+      tor.state = 'error';
+      tor.error = e.message;
+    }
+    return tor.info();
+  }
+
+  stopTor() {
+    const was = this.tor;
+    this.tor = null;
+    this.node.onionDialer = null;
+    if (was) was.stop();
+    if (this.policy && this.node.exit && this.node.exit.tor) {
+      this.node.exit = { ports: this.policy.ports, tor: false };
+      this.node.announce();
+    }
+    return { state: 'off', torAll: this.opts.torAll };
   }
 
   setTorAll(on) {
@@ -109,7 +143,7 @@ class Bridge {
       throw new Error('refusing to run an open internet exit on the public net — start with --net <secret> so only your nodes can use it, or pass --exit-open');
     }
     this.policy = { ports: ports.map(Number).filter((p) => p > 0 && p < 65536), lan: !!lan, open: !!open };
-    this.node.exit = { ports: this.policy.ports, tor: !!(this.tor && this.tor.ready) };
+    this.node.exit = { ports: this.policy.ports, tor: !!(this.tor && this.tor.ready && this.torForPeers) };
     this.node.streamHandler = (src, m) => this._exitStream(src, m);
     this.node.announce();
   }
@@ -126,7 +160,7 @@ class Bridge {
     if (mine >= 64) return fail('too many open streams from you');
     const onion = isOnion(host);
     const viaTor = onion || m.tor === true;
-    if (viaTor && !(this.tor && this.tor.ready)) return fail(onion ? 'this exit has no Tor, so it cannot open .onion sites' : 'this exit has no Tor');
+    if (viaTor && !(this.torForPeers && this.tor && this.tor.ready)) return fail(onion ? 'this exit has no Tor, so it cannot open .onion sites' : 'this exit has no Tor');
     let sock;
     try {
       // Through Tor, names are resolved by Tor and Tor refuses internal addresses itself.
@@ -164,9 +198,8 @@ class Bridge {
         return s;
       }
       if (!exit) {
-        throw new Error(onion
-          ? 'no Tor on this node or the net — start this node with --tor, or an exit with --exit --tor'
-          : 'Tor-only mode is on, but no Tor is reachable — nothing was sent');
+        if (this.opts.torAll) throw new Error('Tor-only mode is on, but no Tor is reachable — nothing was sent');
+        throw new Error('no Tor on this node or the net — turn Tor on under Internet, or start an exit with --exit --tor');
       }
       const s = this.node.openStream(exit, host, port, { tor: true });
       await connected(s);
@@ -339,7 +372,7 @@ class Bridge {
   info() {
     return {
       exit: this.policy ? {
-        ports: this.policy.ports, open: this.policy.open, tor: !!(this.tor && this.tor.ready),
+        ports: this.policy.ports, open: this.policy.open, tor: !!(this.tor && this.tor.ready && this.torForPeers),
         recent: this.exitLog.slice(0, 10).map((x) => ({ ...x, from: this.node.nameOf(x.from) })),
       } : null,
       proxy: this.proxyPort ? { host: this.proxyHost, port: this.proxyPort } : null,
@@ -347,6 +380,7 @@ class Bridge {
       via: this.opts.via,
       exits: this.node.exits(),
       tor: this.tor ? this.tor.info() : null,
+      torInstalled: !!findTor(this.opts.torPath),
       torAll: this.opts.torAll,
     };
   }

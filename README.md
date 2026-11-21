@@ -14,7 +14,7 @@ internet, it **bridges into the regular internet** in both directions.
 | **Over the internet** | Link to any node by `host:port`. A cheap VPS makes a seed that joins people anywhere. |
 | **Into the internet** | A node with internet becomes an **exit**. Point your browser's proxy at your own node and the whole web travels the net. HTTPS stays end-to-end, so the exit sees only ciphertext. |
 | **Out of the internet** | A **gateway** lets ordinary browsers read Jāla sites. |
-| **Tor and .onion sites** | `--tor`, and the dark web opens from any node: through your own Tor or a Jāla exit's. Pages show in a reader with no JavaScript and no cookies, or in your browser through the proxy. `--tor-all` sends all traffic through Tor and fails closed. |
+| **Tor and .onion sites** | Turn Tor on from the portal's Internet tab (no flag, no restart) or with `--tor`, and the dark web opens from any node: through your own Tor or a Jāla exit's. Pages show in a reader with no JavaScript and no cookies, or in your browser through the proxy. `--tor-all` sends all traffic through Tor and fails closed. |
 | **Reachable from anywhere** | `--onion` makes your node an onion service: peers link to `<name>.onion:4747` from any network. No public IP, no open port, no router setup. |
 
 Zero dependencies: Node 20+ and nothing else. MIT.
@@ -51,7 +51,7 @@ jaal start --onion                    # reachable from anywhere as <name>.onion:
 jaal start --tor --peer <name>.onion:4747
 ```
 
-Type an `.onion` address in the portal's address bar to open it in the reader. From any app, use the proxy, e.g. `curl -x http://127.0.0.1:8118 http://<…>.onion/`. Jāla never installs Tor as a service: it uses a Tor that's already running (port 9050 or 9150), or starts its own, which stops with the node.
+The Tor card in the portal's Internet tab turns Tor on for this node with one control, and lists a few checked `.onion` sites that open in the reader. Type an `.onion` address in the portal's address bar to open it in the reader. From any app, use the proxy, e.g. `curl -x http://127.0.0.1:8118 http://<…>.onion/`. Jāla never installs Tor as a service: it uses a Tor that's already running (port 9050 or 9150), or starts its own, which stops with the node.
 
 **Phones on your Wi-Fi.** Use `--proxy-host 0.0.0.0` to share the proxy and `--gateway 8080` to share a read-only site gateway.
 
@@ -86,7 +86,7 @@ Here's what it doesn't do. Read this before trusting it with anything that matte
 
 ## Proof
 
-`npm test` runs 25 tests (17 core, 3 seed, 5 Tor against a fake SOCKS5 Tor), about 3.5 s, no network. They cover RFC 4648 base32 vectors, sealed-box tamper and impersonation cases, 4-node routing hop counts, a message across two relays that never see the words, signed sites (forged manifests, path-as-hash, bad bytes all refused), a mirror serving after the owner dies, a wrong `--net` secret refused, an offline message delivered on return, a 2 MB stream byte-exact over three hops, proxy HTTP and CONNECT, exit policy in **both** directions, and the gateway.
+`npm test` runs 31 tests (17 core, 3 seed, 11 Tor against a fake SOCKS5 Tor and a fake tor binary), about 3.5 s, no network. They cover RFC 4648 base32 vectors, sealed-box tamper and impersonation cases, 4-node routing hop counts, a message across two relays that never see the words, signed sites (forged manifests, path-as-hash, bad bytes all refused), a mirror serving after the owner dies, a wrong `--net` secret refused, an offline message delivered on return, a 2 MB stream byte-exact over three hops, proxy HTTP and CONNECT, exit policy in **both** directions, the gateway, the portal's Tor switch, Tor-only mode, and the reader's reason for a failed site.
 
 **Live run, 2026-11-19.** Three separate processes, wired `mathura → prayag → kashi`, with the route checked before any traffic: mathura's only link was prayag, and kashi was 2 hops away. Through mathura's proxy:
 

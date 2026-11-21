@@ -115,7 +115,8 @@ const parseSpec = (spec) => {
 };
 
 class Tor {
-  // opts: { socks: 'host:port' — use this Tor; onion: publish this node as an onion service; torPath }
+  // opts: { socks: 'host:port' — use this Tor; onion: publish this node as an onion service; torPath;
+  //          probePorts: SOCKS ports to look for a Tor already running (default 9050, 9150) }
   constructor(node, opts = {}) {
     this.node = node;
     this.opts = opts;
@@ -145,12 +146,12 @@ class Tor {
       return this;
     }
     if (!this.opts.onion) {
-      for (const port of [9050, 9150]) if (await probeSocks('127.0.0.1', port)) return this._ready('system', '127.0.0.1', port);
+      for (const port of this.opts.probePorts || [9050, 9150]) if (await probeSocks('127.0.0.1', port)) return this._ready('system', '127.0.0.1', port);
     }
     const bin = findTor(this.opts.torPath);
     if (!bin) {
       this.state = 'missing';
-      this.error = 'Tor is not installed (macOS: brew install tor · Debian/Ubuntu: apt install tor)';
+      this.error = 'Tor is not installed (macOS: brew install tor · Debian/Ubuntu: sudo apt install tor)';
       this.log('tor: ' + this.error);
       return this;
     }
@@ -173,6 +174,13 @@ class Tor {
     this.socksPort = socksPort;
     this.source = 'jaal';
     this.proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    this.proc.once('error', (e) => {
+      if (this.stopping) return;
+      this.state = 'error';
+      this.error = `could not run tor (${e.message})`;
+      this.log('tor: ' + this.error);
+      this._flush(new Error(this.error));
+    });
     this.log(`tor: starting our own Tor (${bin}), SOCKS 127.0.0.1:${socksPort}${hsDir ? ' + onion service' : ''}`);
     let tail = '';
     const onLine = (line) => {
@@ -250,6 +258,7 @@ class Tor {
     this.stopping = true;
     if (this.proc && this.proc.exitCode === null) this.proc.kill('SIGTERM');
     this.state = 'off';
+    this._flush(new Error('Tor was turned off'));
   }
 
   info() {

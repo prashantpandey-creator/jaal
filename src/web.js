@@ -126,6 +126,11 @@ async function readerPage(req, res, bridge, prefix, rest) {
     }
   }
   const type = String(r.headers['content-type'] || 'application/octet-stream');
+  if (req.method !== 'HEAD' && r.body.length === 0) {
+    // nothing in the answer: say what the site answered, rather than show a blank page
+    const what = `${r.status} ${http.STATUS_CODES[r.status] || ''}`.trim();
+    return send(res, r.status >= 400 ? r.status : 200, 'text/html; charset=utf-8', page('Empty answer', `<h1>The site sent no page</h1><p>It answered <code>${esc(what)}</code> and sent no body. Route: ${esc(via)}.</p><p class="m"><code>${esc(u.href)}</code></p>`), { 'content-security-policy': READER_CSP, 'x-jaal-via': hv(via) });
+  }
   let out = r.body;
   if (/^(text\/html|application\/xhtml)/i.test(type)) out = Buffer.from(rewriteHtml(out.toString('latin1'), u.href, prefix), 'latin1');
   res.writeHead(r.status, {
@@ -264,6 +269,8 @@ function makeApi(node, sites, msgs, bridge) {
       case 'POST webcheck':
         return bridge.webcheck(String(body.url || 'https://example.com/'));
       case 'POST tor':
+        // {on} turns this node's Tor on or off; {all} sets Tor-only mode. Either can be sent alone.
+        if (typeof body.on === 'boolean') return body.on ? bridge.startTor() : bridge.stopTor();
         return bridge.setTorAll(!!body.all);
       case 'POST torcheck':
         return bridge.torcheck();
